@@ -35,6 +35,12 @@ AddEventHandler('achievements:getPlayerTier', function()
     -- Continue with achievement logic...
 end)
 
+RegisterNetEvent("achievements:getProgress")
+AddEventHandler("achievements:getProgress", function()
+    -- Get player's achievement data
+    TriggerClientEvent("achievements:showProgress", source, data)
+end)
+
 -- Vehicle modification validation
 RegisterNetEvent('achievements:requestVehicleMods')
 AddEventHandler('achievements:requestVehicleMods', function(vehicleNetId)
@@ -53,6 +59,12 @@ AddEventHandler('achievements:requestVehicleMods', function(vehicleNetId)
     end
     
     -- Continue with vehicle modification logic...
+end)
+
+RegisterNetEvent("achievements:applyVehicleMods")
+AddEventHandler("achievements:applyVehicleMods", function(vehicleNetId)
+    -- Get player tier and send to all clients
+    TriggerClientEvent("achievements:applyVehicleModsClient", -1, vehicleNetId, tierData)
 end)
 
 -- Get player's highest achievement tier

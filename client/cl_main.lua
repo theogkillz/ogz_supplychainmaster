@@ -6,7 +6,7 @@ local lastDeliveryTime = 0
 local DELIVERY_COOLDOWN = 300000 -- 5 minutes in milliseconds
 local REQUIRED_BOXES = 3 -- Fixed number of boxes to deliver
 
--- Show Leaderboard Event (MISSING IN GROK VERSION)
+-- Show Leaderboard Event
 RegisterNetEvent("warehouse:showLeaderboard")
 AddEventHandler("warehouse:showLeaderboard", function(leaderboard)
     local options = {}
@@ -37,57 +37,22 @@ AddEventHandler("warehouse:showLeaderboard", function(leaderboard)
     lib.showContext("leaderboard_menu")
 end)
 
--- Universal client validation
-local function validatePlayerAccess(feature)
+-- Simple job check helper
+local function hasWarehouseAccess()
     local PlayerData = QBCore.Functions.GetPlayerData()
     if not PlayerData or not PlayerData.job then
-        return false, "No job data available"
+        return false
     end
     
     local playerJob = PlayerData.job.name
-    local currentJob = playerJob or "unemployed"
-    
-    -- Use config validation
-    local hasAccess = false
-    if feature == "achievement" then
-        hasAccess = Config.JobValidation.validateAchievementAccess(playerJob)
-    elseif feature == "npc" then
-        hasAccess = Config.JobValidation.validateNPCAccess(playerJob)
-    elseif feature == "vehicle" then
-        hasAccess = Config.JobValidation.validateVehicleOwnership(playerJob)
-    elseif feature == "manufacturing" then
-        hasAccess = Config.JobValidation.validateManufacturingAccess(playerJob)
-    elseif feature == "warehouse" then
-        hasAccess = Config.JobValidation.validateWarehouseAccess(playerJob)
+    for _, authorizedJob in ipairs(Config.Jobs.warehouse) do
+        if playerJob == authorizedJob then
+            return true
+        end
     end
     
-    if not hasAccess then
-        local errorMessage = Config.JobValidation.getAccessDeniedMessage(feature, currentJob)
-        return false, errorMessage
-    end
-    
-    return true, "Access granted"
+    return false
 end
 
--- Export validation helper
-exports('validatePlayerAccess', validatePlayerAccess)
-
--- Universal access denied notification
-local function showAccessDenied(feature, customMessage)
-    local PlayerData = QBCore.Functions.GetPlayerData()
-    local currentJob = PlayerData and PlayerData.job and PlayerData.job.name or "unemployed"
-    
-    local message = customMessage or Config.JobValidation.getAccessDeniedMessage(feature, currentJob)
-    
-    lib.notify({
-        title = "🚫 Access Denied",
-        description = message,
-        type = "error",
-        duration = 8000,
-        position = Config.UI.notificationPosition,
-        markdown = Config.UI.enableMarkdown
-    })
-end
-
--- Export notification helper
-exports('showAccessDenied', showAccessDenied)
+-- Export for other scripts if needed
+exports('hasWarehouseAccess', hasWarehouseAccess)

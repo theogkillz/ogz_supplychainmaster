@@ -6,7 +6,7 @@ local QBCore = exports['qb-core']:GetCoreObject()
 local stockCache = {}
 local cacheExpiry = {}
 local CACHE_DURATION = 30000 -- 30 seconds in milliseconds
-local warehouseId = GetWarehouseForOrder(orderItems)
+
 
 -- Cache helper functions
 local function isCacheValid(key)
@@ -80,67 +80,67 @@ local function calculateDeliveryInfo(orderGroup)
 end
 
 -- Get Pending Orders (MISSING IN CURRENT VERSION)
-RegisterNetEvent("warehouse:getPendingOrders")
-AddEventHandler("warehouse:getPendingOrders", function(warehouseId)
-    local src = source
-    warehouseId = warehouseId or 1
+RegisterNetEvent('warehouse:getPendingOrders')
+AddEventHandler('warehouse:getPendingOrders', function()
+    local playerId = source
+    if not hasWarehouseAccess(playerId) then
+        return -- Silently reject unauthorized access
+    end
     
-    -- Base query
-    local query = [[
-        SELECT 
-            so.order_group_id as orderGroupId,
-            so.restaurant_id as restaurantId,
-            SUM(so.total_cost) as totalCost,
-            GROUP_CONCAT(
-                CONCAT(so.ingredient, ':', so.quantity)
-                SEPARATOR ','
-            ) as items
-        FROM supply_orders so
-        WHERE so.status = 'pending'
-        GROUP BY so.order_group_id, so.restaurant_id
-        ORDER BY MIN(so.created_at) ASC
-    ]]
-    
-    MySQL.Async.fetchAll(query, {}, function(results)
-        if not results or #results == 0 then
-            TriggerClientEvent("warehouse:showOrderDetails", src, {})
+    MySQL.Async.fetchAll('SELECT * FROM supply_orders WHERE status = ?', { 'pending' }, function(results)
+        if not results then
+            print("[ERROR] No results from supply_orders query")
             return
         end
         
-        local orders = {}
+        local ordersByGroup = {}
+        local itemNames = exports.ox_inventory:Items() or {}
         
-        for _, row in ipairs(results) do
-            local orderItems = {}
-            if row.items then
-                for item in string.gmatch(row.items, "[^,]+") do
-                    local ingredient, quantity = item:match("([^:]+):(%d+)")
-                    if ingredient and quantity then
-                        table.insert(orderItems, {
-                            itemName = ingredient,
-                            quantity = tonumber(quantity)
-                        })
-                    end
+        for _, order in ipairs(results) do
+            local restaurantJob = Config.Restaurants[order.restaurant_id] and Config.Restaurants[order.restaurant_id].job
+            if restaurantJob then
+                local itemKey = order.ingredient:lower()
+                local item = (Config.Items[restaurantJob].Meats[itemKey] or Config.Items[restaurantJob].Vegetables[itemKey] or Config.Items[restaurantJob].Fruits[itemKey])
+                local itemLabel = itemNames[itemKey] and itemNames[itemKey].label or item and item.label or itemKey
+
+            if item then
+                local orderGroupId = order.order_group_id or tostring(order.id)
+                if not ordersByGroup[orderGroupId] then
+                    ordersByGroup[orderGroupId] = {
+                        orderGroupId = orderGroupId,
+                        id = order.id,
+                        ownerId = order.owner_id,
+                        restaurantId = order.restaurant_id,
+                        totalCost = 0,
+                        items = {}
+                    }
                 end
-            end
-            
-            -- Check if this order should be handled by this warehouse
-            local shouldHandle = true
-            if Config.WarehouseSpecialization.enabled then
-                local assignedWarehouse = GetWarehouseForOrder(orderItems)
-                shouldHandle = (assignedWarehouse == warehouseId)
-            end
-            
-            if shouldHandle then
-                table.insert(orders, {
-                    orderGroupId = row.orderGroupId,
-                    restaurantId = row.restaurantId,
-                    totalCost = row.totalCost,
-                    items = orderItems
+                table.insert(ordersByGroup[orderGroupId].items, {
+                    id = order.id,
+                    itemName = itemKey,        -- Keep internal name for logic
+                    itemLabel = itemLabel,     -- ADD THIS: proper display label
+                    quantity = order.quantity,
+                    totalCost = order.total_cost
                 })
+                    ordersByGroup[orderGroupId].totalCost = ordersByGroup[orderGroupId].totalCost + order.total_cost
+                else
+                    print("[ERROR] Item not found: ", itemKey, " for job: ", restaurantJob)
+                end
+            else
+                print("[ERROR] Invalid restaurant job for restaurant_id: ", order.restaurant_id)
             end
         end
         
-        TriggerClientEvent("warehouse:showOrderDetails", src, orders)
+        local orders = {}
+        for _, orderGroup in pairs(ordersByGroup) do
+            -- Add delivery calculation info
+            local deliveryInfo = calculateDeliveryInfo(orderGroup)
+            orderGroup.deliveryInfo = deliveryInfo
+            
+            table.insert(orders, orderGroup)
+        end
+        
+        TriggerClientEvent('warehouse:showOrderDetails', playerId, orders)
     end)
 end)
 

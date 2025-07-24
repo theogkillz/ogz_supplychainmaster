@@ -80,10 +80,8 @@ local function selectDeliveryVehicle(boxCount)
 end
 
 -- Warehouse Targets and Peds
--- Warehouse Targets and Peds
 Citizen.CreateThread(function()
     for index, warehouse in ipairs(Config.WarehousesLocation) do
-        -- Create target zone
         exports.ox_target:addBoxZone({
             coords = warehouse.position,
             size = vector3(1.0, 0.5, 3.5),
@@ -94,7 +92,7 @@ Citizen.CreateThread(function()
                     name = "warehouse_processing_" .. tostring(index),
                     icon = "fas fa-box",
                     label = "Process Orders",
-                    jobs = Config.Jobs.warehouse,
+                    jobs = Config.Jobs.warehouse, -- Use jobs array instead of groups
                     onSelect = function()
                         -- Add animation
                         local animDict = "anim@heists@prison_heiststation@cop_reactions"
@@ -105,15 +103,13 @@ Citizen.CreateThread(function()
                         end
                         TaskPlayAnim(PlayerPedId(), animDict, animName, 8.0, -8.0, 1500, 0, 0, false, false, false)
                         
-                        Wait(1500)
-                        -- Pass warehouse ID to menu
-                        TriggerEvent("warehouse:openProcessingMenu", index)
+                        Wait(1500) -- Wait for animation
+                        TriggerEvent("warehouse:openProcessingMenu")
                     end
                 }
             }
         })
 
-        -- Create ped
         local pedModel = GetHashKey(warehouse.pedhash)
         RequestModel(pedModel)
         while not HasModelLoaded(pedModel) do
@@ -126,15 +122,14 @@ Citizen.CreateThread(function()
         SetEntityInvincible(ped, true)
         SetModelAsNoLongerNeeded(pedModel)
 
-        -- Create blip with dynamic color
         local blip = AddBlipForCoord(warehouse.position.x, warehouse.position.y, warehouse.position.z)
         SetBlipSprite(blip, 473)
         SetBlipDisplay(blip, 4)
         SetBlipScale(blip, 0.6)
-        SetBlipColour(blip, GetWarehouseBlipColor(index))
+        SetBlipColour(blip, 16)
         SetBlipAsShortRange(blip, true)
         BeginTextCommandSetBlipName("STRING")
-        AddTextComponentString(GetWarehouseName(index))
+        AddTextComponentString("Warehouse")
         EndTextCommandSetBlipName(blip)
         Citizen.Wait(0)
     end
@@ -142,10 +137,7 @@ end)
 
 -- CLEAN Warehouse Menu - Removed non-existent options
 RegisterNetEvent("warehouse:openProcessingMenu")
-AddEventHandler("warehouse:openProcessingMenu", function(warehouseId)
-    -- Store current warehouse ID
-    currentWarehouseId = warehouseId or 1
-    
+AddEventHandler("warehouse:openProcessingMenu", function()
     -- Validate job access
     if not hasWarehouseAccess() then
         local PlayerData = QBCore.Functions.GetPlayerData()
@@ -162,32 +154,25 @@ AddEventHandler("warehouse:openProcessingMenu", function(warehouseId)
         return
     end
     
-    local warehouseName = GetWarehouseName(currentWarehouseId)
-    
     local options = {
         { 
             title = "📦 View Orders", 
             description = "Process pending delivery orders",
             icon = "fas fa-clipboard-list",
-            onSelect = function() 
-                -- Pass warehouse ID to server
-                TriggerServerEvent("warehouse:getPendingOrders", currentWarehouseId) 
-            end 
+            onSelect = function() TriggerServerEvent("warehouse:getPendingOrders") end 
         },
         { 
             title = "📊 View Stock", 
             description = "Check warehouse inventory levels",
             icon = "fas fa-warehouse",
-            onSelect = function() 
-                TriggerServerEvent("warehouse:getStocks", currentWarehouseId) 
-            end 
+            onSelect = function() TriggerServerEvent("warehouse:getStocks") end 
         },
         {
             title = "🚨 Stock Alerts",
             description = "View low stock warnings and predictions",
             icon = "fas fa-exclamation-triangle",
             onSelect = function()
-                TriggerServerEvent("stockalerts:getAlerts", currentWarehouseId)
+                TriggerServerEvent("stockalerts:getAlerts")
             end
         },
         {
@@ -223,23 +208,9 @@ AddEventHandler("warehouse:openProcessingMenu", function(warehouseId)
             end
         },
     }
-    
-    -- Add specialization info if enabled
-    if Config.WarehouseSpecialization.enabled then
-        local warehouse = Config.WarehousesLocation[currentWarehouseId]
-        if warehouse and warehouse.specialization then
-            table.insert(options, 1, {
-                title = "📍 " .. warehouseName,
-                description = "Specializes in: " .. warehouse.specialization.type,
-                icon = "fas fa-warehouse",
-                disabled = true
-            })
-        end
-    end
-    
     lib.registerContext({
         id = "main_menu",
-        title = "🏢 " .. warehouseName,
+        title = "🏢 Hurst Industries - Warehouse Operations",
         options = options
     })
     lib.showContext("main_menu")
@@ -391,21 +362,17 @@ end)
 
 -- Enhanced Spawn Delivery Van with Multi-Box Support and Vehicle Selection
 RegisterNetEvent("warehouse:spawnVehicles")
-AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders, assignedWarehouseId)
+AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
     local boxesNeeded, containersNeeded, totalItems, itemsList = calculateDeliveryBoxes(orders)
     
     print("[DEBUG] Delivery calculated:", boxesNeeded, "boxes,", containersNeeded, "containers for", totalItems, "items")
-    print("[DEBUG] Assigned to warehouse:", assignedWarehouseId or currentWarehouseId or 1)
     
-    -- Use assigned warehouse or current warehouse
-    local warehouseId = assignedWarehouseId or currentWarehouseId or 1
-    local warehouseBays = GetWarehouseBays(warehouseId)
-    
-    if #warehouseBays == 0 then
-        print("[ERROR] No active bays for warehouse", warehouseId)
+    local warehouseConfig = Config.Warehouses[1]
+    if not warehouseConfig then
+        print("[ERROR] No warehouse configuration found")
         lib.notify({
             title = "Error",
-            description = "No loading bays available at this warehouse.",
+            description = "No warehouse configuration found.",
             type = "error",
             duration = 10000,
             position = Config.UI.notificationPosition,
@@ -413,13 +380,7 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders, assign
         })
         return
     end
-    
-    -- Select a random available bay
-    local selectedBay = warehouseBays[math.random(#warehouseBays)]
-    
-    -- Rest of the spawn code remains the same, just use selectedBay instead of Config.Warehouses[1]
-    local warehouseConfig = selectedBay
-    
+
     -- Dynamic delivery briefing based on order size
     local briefingText = ""
     local vehicleType = ""
@@ -436,7 +397,7 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders, assign
 
     lib.alertDialog({
         header = "📦 New Delivery Job",
-        content = briefingText .. "\n\nVehicle: " .. vehicleType .. "\nLoading Bay: " .. GetWarehouseName(warehouseId),
+        content = briefingText .. "\n\nVehicle: " .. vehicleType,
         centered = true,
         cancel = true
     })

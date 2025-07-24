@@ -29,6 +29,7 @@ client_scripts {
     -- Stock & Market Systems
     'client/cl_stock.lua',
     'client/cl_stock_alerts.lua',
+    'client/cl_stock_alerts_menu.lua',
     'client/cl_market.lua',
     'client/cl_seller.lua',
     
@@ -47,6 +48,8 @@ client_scripts {
     'client/cl_leaderboard.lua',
     'client/cl_rewards.lua',
     'client/cl_vehicle_achievements.lua',
+    'client/cl_vehicle_achievement_handler.lua',
+    'client/cl_achievement_progress.lua',
     -- 'client/cl_npc_surplus.lua',
     
     -- Administration
