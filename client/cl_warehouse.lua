@@ -185,18 +185,10 @@ AddEventHandler("warehouse:openProcessingMenu", function()
         },
         {
             title = "📊 My Performance",
-            description = "View your personal delivery statistics",
+            description = "View your delivery stats, streaks, and daily progress",
             icon = "fas fa-chart-line",
             onSelect = function()
                 TriggerServerEvent("leaderboard:getPersonalStats")
-            end
-        },
-        {
-            title = "🎯 My Driver Status",
-            description = "View current streaks and upcoming bonuses",
-            icon = "fas fa-fire",
-            onSelect = function()
-                TriggerServerEvent("rewards:getPlayerStatus")
             end
         },
         {

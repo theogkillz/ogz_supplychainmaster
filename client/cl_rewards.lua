@@ -1,5 +1,37 @@
 local QBCore = exports['qb-core']:GetCoreObject()
 
+-- Helper function to format time (moved to top)
+local function formatTime(seconds)
+    -- Ensure seconds is a number
+    seconds = tonumber(seconds) or 0
+    
+    if seconds < 60 then
+        return string.format("%d seconds", seconds)
+    elseif seconds < 3600 then
+        local minutes = math.floor(seconds / 60)
+        return string.format("%d minutes", minutes)
+    elseif seconds < 86400 then
+        local hours = math.floor(seconds / 3600)
+        return string.format("%d hours", hours)
+    else
+        local days = math.floor(seconds / 86400)
+        return string.format("%d days", days)
+    end -- End streak section
+end
+
+-- Helper function to format numbers with commas
+local function comma_value(amount)
+    if not amount then return "0" end
+    local formatted = tostring(amount)
+    while true do  
+        formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", '%1,%2')
+        if (k == 0) then
+            break
+        end
+    end
+    return formatted
+end
+
 -- Driver Status Display
 RegisterNetEvent("rewards:showDriverStatus")
 AddEventHandler("rewards:showDriverStatus", function(playerStats)
@@ -20,10 +52,10 @@ AddEventHandler("rewards:showDriverStatus", function(playerStats)
             title = "📊 Performance Overview",
             description = string.format(
                 "🚛 Deliveries: %d\n💰 Total Earnings: $%s\n⭐ Current Streak: %d\n🏆 Best Streak: %d",
-                playerStats.total_deliveries or 0,
+                tonumber(playerStats.total_deliveries) or 0,
                 comma_value(playerStats.total_earnings or 0),
-                playerStats.current_streak or 0,
-                playerStats.best_streak or 0
+                tonumber(playerStats.current_streak) or 0,
+                tonumber(playerStats.best_streak) or 0
             ),
             disabled = false
         },
@@ -33,7 +65,7 @@ AddEventHandler("rewards:showDriverStatus", function(playerStats)
                 "🚀 Average Time: %s\n⚡ Fastest Delivery: %s\n🎯 Perfect Deliveries: %d",
                 formatTime(playerStats.average_time or 0),
                 formatTime(playerStats.fastest_time or 0),
-                playerStats.perfect_deliveries or 0
+                tonumber(playerStats.perfect_deliveries) or 0
             ),
             disabled = false
         },
@@ -41,19 +73,20 @@ AddEventHandler("rewards:showDriverStatus", function(playerStats)
             title = "📦 Volume Statistics", 
             description = string.format(
                 "📋 Total Boxes: %d\n📊 Avg Boxes/Delivery: %.1f\n🏗️ Largest Delivery: %d boxes",
-                playerStats.total_boxes or 0,
-                playerStats.total_deliveries > 0 and (playerStats.total_boxes / playerStats.total_deliveries) or 0,
-                playerStats.largest_delivery or 0
+                tonumber(playerStats.total_boxes) or 0,
+                (tonumber(playerStats.total_deliveries) or 0) > 0 and ((tonumber(playerStats.total_boxes) or 0) / (tonumber(playerStats.total_deliveries) or 1)) or 0,
+                tonumber(playerStats.largest_delivery) or 0
             ),
             disabled = false
         }
     }
 
     -- Add current streak bonus info
-    if playerStats.current_streak and playerStats.current_streak > 0 then
+    local currentStreak = tonumber(playerStats.current_streak) or 0
+    if currentStreak > 0 then
         local nextStreakBonus = nil
         for _, bonus in pairs(Config.DriverRewards.streakBonuses) do
-            if playerStats.current_streak < bonus.streak then
+            if currentStreak < bonus.streak then
                 nextStreakBonus = bonus
                 break
             end
@@ -64,21 +97,22 @@ AddEventHandler("rewards:showDriverStatus", function(playerStats)
                 title = "🔥 Streak Progress",
                 description = string.format(
                     "Current: %d deliveries\nNext Bonus: %s at %d deliveries\n(%d more needed)",
-                    playerStats.current_streak,
+                    currentStreak,
                     nextStreakBonus.name,
                     nextStreakBonus.streak,
-                    nextStreakBonus.streak - playerStats.current_streak
+                    nextStreakBonus.streak - currentStreak
                 ),
                 disabled = true
             })
         end
-    end
+    end -- End daily progress section
 
     -- Add daily progress
-    if playerStats.daily_deliveries then
+    local dailyDeliveries = tonumber(playerStats.daily_deliveries) or 0
+    if dailyDeliveries > 0 then
         local nextDailyBonus = nil
         for _, multiplier in ipairs(Config.DriverRewards.dailyMultipliers) do
-            if playerStats.daily_deliveries < multiplier.deliveries then
+            if dailyDeliveries < multiplier.deliveries then
                 nextDailyBonus = multiplier
                 break
             end
@@ -89,7 +123,7 @@ AddEventHandler("rewards:showDriverStatus", function(playerStats)
                 title = "📅 Daily Progress",
                 description = string.format(
                     "Today: %d deliveries\nNext Milestone: %s\n(%.1fx multiplier at %d deliveries)",
-                    playerStats.daily_deliveries,
+                    dailyDeliveries,
                     nextDailyBonus.name,
                     nextDailyBonus.multiplier,
                     nextDailyBonus.deliveries
@@ -106,38 +140,6 @@ AddEventHandler("rewards:showDriverStatus", function(playerStats)
     })
     lib.showContext("driver_status_menu")
 end)
-
--- Helper function to format time
-local function formatTime(seconds)
-    -- Ensure seconds is a number
-    seconds = tonumber(seconds) or 0
-    
-    if seconds < 60 then
-        return string.format("%d seconds", seconds)
-    elseif seconds < 3600 then
-        local minutes = math.floor(seconds / 60)
-        return string.format("%d minutes", minutes)
-    elseif seconds < 86400 then
-        local hours = math.floor(seconds / 3600)
-        return string.format("%d hours", hours)
-    else
-        local days = math.floor(seconds / 86400)
-        return string.format("%d days", days)
-    end
-end
-
--- Helper function to format numbers with commas
-function comma_value(amount)
-    if not amount then return "0" end
-    local formatted = amount
-    while true do  
-        formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", '%1,%2')
-        if (k == 0) then
-            break
-        end
-    end
-    return formatted
-end
 
 -- Reward Notification Display
 RegisterNetEvent("rewards:showRewardBreakdown")
