@@ -140,30 +140,30 @@ AddEventHandler("warehouse:openProcessingMenu", function()
             icon = "fas fa-clipboard-list",
             onSelect = function() TriggerServerEvent("warehouse:getPendingOrders") end 
         },
-        {
-            title = "🚨 Stock Alerts Dashboard",
-            description = "Monitor inventory levels and predictions",
-            icon = "fas fa-chart-line",
-            onSelect = function()
-                TriggerEvent("stockalerts:openDashboard")
-            end
-        },
-        {
-            title = "📦 Restock Suggestions",
-            description = "AI-powered reorder recommendations",
-            icon = "fas fa-magic",
-            onSelect = function()
-                TriggerServerEvent("stockalerts:getSuggestions")
-            end
-        },
-                {
-            title = "🤖 NPC Delivery Management",
-            description = "Manage NPC drivers for surplus inventory",
-            icon = "fas fa-robot",
-            onSelect = function()
-                TriggerEvent("npc:openManagementMenu")
-            end
-        },
+        -- {
+        --     title = "🚨 Stock Alerts Dashboard",
+        --     description = "Monitor inventory levels and predictions",
+        --     icon = "fas fa-chart-line",
+        --     onSelect = function()
+        --         TriggerEvent("stockalerts:openDashboard")
+        --     end
+        -- },
+        -- {
+        --     title = "📦 Restock Suggestions",
+        --     description = "AI-powered reorder recommendations",
+        --     icon = "fas fa-magic",
+        --     onSelect = function()
+        --         TriggerServerEvent("stockalerts:getSuggestions")
+        --     end
+        -- },
+        --         {
+        --     title = "🤖 NPC Delivery Management",
+        --     description = "Manage NPC drivers for surplus inventory",
+        --     icon = "fas fa-robot",
+        --     onSelect = function()
+        --         TriggerEvent("npc:openManagementMenu")
+        --     end
+        -- },
         {
             title = "🏆 Driver Leaderboards",
             description = "View top performing drivers and rankings",
@@ -977,7 +977,7 @@ AddEventHandler("warehouse:startDelivery", function(restaurantId, van, orders)
     
     lib.alertDialog({
         header = "Van Loaded",
-        content = string.format("Drive to the restaurant and deliver %d boxes. Look for the green delivery marker!", boxesNeeded),
+        content = string.format("Drive to the restaurant and deliver %d boxes to businesses door!", boxesNeeded),
         centered = true,
         cancel = true
     })
@@ -1193,7 +1193,7 @@ AddEventHandler("warehouse:grabBoxFromVan", function(restaurantId, van, orders, 
 
                                 lib.notify({
                                     title = "Box Grabbed",
-                                    description = "Take it to the green delivery marker.",
+                                    description = "Take box to the businesses door.",
                                     type = "success",
                                     duration = 10000,
                                     position = Config.UI.notificationPosition,

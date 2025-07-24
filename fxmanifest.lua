@@ -9,12 +9,12 @@ lua54 'yes'
 
 shared_scripts {
     '@ox_lib/init.lua',
+    '@lation_ui/init.lua',
     'shared/config_main.lua',
     'shared/config_locations.lua',
     'shared/config_items.lua',
-    'shared/config_containers.lua',
-    'shared/config_manufacturing.lua',
-    '@lation_ui/init.lua',
+    -- 'shared/config_containers.lua',
+    -- 'shared/config_manufacturing.lua',
 }
 
 client_scripts {
@@ -33,12 +33,12 @@ client_scripts {
     'client/cl_seller.lua',
     
     -- Container Systems
-    'client/cl_containers.lua',
-    'client/cl_containers_dynamic.lua',
-    'client/cl_vehicle_containers.lua',
+    -- 'client/cl_containers.lua',
+    -- 'client/cl_containers_dynamic.lua',
+    -- 'client/cl_vehicle_containers.lua',
     
     -- Manufacturing System
-    'client/cl_manufacturing.lua',
+    -- 'client/cl_manufacturing.lua',
     
     -- Team & Delivery Systems
     'client/cl_team_deliveries.lua',
@@ -47,7 +47,7 @@ client_scripts {
     'client/cl_leaderboard.lua',
     'client/cl_rewards.lua',
     'client/cl_vehicle_achievements.lua',
-    'client/cl_npc_surplus.lua',
+    -- 'client/cl_npc_surplus.lua',
     
     -- Administration
     'client/cl_admin.lua'
@@ -57,7 +57,7 @@ server_scripts {
     '@oxmysql/lib/MySQL.lua',
     
     -- Core Foundation
-    'server/sv_database.lua',
+    -- 'server/sv_database.lua',
     'server/sv_main.lua',
     
     -- Market & Pricing Systems
@@ -73,12 +73,12 @@ server_scripts {
     'server/sv_performance_tracking.lua',
     'server/sv_leaderboard.lua',
     'server/sv_achievements.lua',
-    'server/sv_npc_surplus.lua',
+    -- 'server/sv_npc_surplus.lua',
 
     
     -- Reward Systems
     'server/sv_rewards.lua',
-    'server/sv_rewards_containers.lua',
+    -- 'server/sv_rewards_containers.lua',
     
     -- Team & Emergency Systems
     'server/sv_team.lua',
@@ -86,10 +86,10 @@ server_scripts {
     'server/sv_emergency_orders.lua',
     
     -- Container & Manufacturing Systems
-    'server/sv_containers.lua',
-    'server/sv_restaurant_containers.lua',
-    'server/sv_warehouse_containers.lua',
-    'server/sv_manufacturing.lua',
+    -- 'server/sv_containers.lua',
+    -- 'server/sv_restaurant_containers.lua',
+    -- 'server/sv_warehouse_containers.lua',
+    -- 'server/sv_manufacturing.lua',
     
     -- Communication Systems
     'server/sv_notifications.lua',

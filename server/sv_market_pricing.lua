@@ -287,7 +287,7 @@ local function updateMarketPrices()
         marketData.lastUpdate = os.time()
         
         -- Save market snapshot to database
-        saveMarketSnapshot()
+        -- saveMarketSnapshot()
     end)
 end
 
@@ -314,22 +314,22 @@ function getBasePriceForIngredient(ingredient)
     return nil
 end
 
--- Save market snapshot to database
-function saveMarketSnapshot()
-    for ingredient, price in pairs(marketData.currentPrices) do
-        MySQL.Async.execute([[
-            INSERT INTO supply_market_snapshots (ingredient, current_price, base_price, multiplier, player_count, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ]], {
-            ingredient,
-            price,
-            getBasePriceForIngredient(ingredient) or 0,
-            price / (getBasePriceForIngredient(ingredient) or 1),
-            #GetPlayers(),
-            os.time()
-        })
-    end
-end
+-- -- Save market snapshot to database
+-- function saveMarketSnapshot()
+--     for ingredient, price in pairs(marketData.currentPrices) do
+--         MySQL.Async.execute([[
+--             INSERT INTO supply_market_snapshots (id, ingredient, base_price, multiplier, final_price, stock_level, demand_level, player_count, created_at)
+--             VALUES (?, ?, ?, ?, ?, ?)
+--         ]], {
+--             ingredient,
+--             price,
+--             getBasePriceForIngredient(ingredient) or 0,
+--             price / (getBasePriceForIngredient(ingredient) or 1),
+--             #GetPlayers(),
+--             os.time()
+--         })
+--     end
+-- end
 
 -- Event handlers for market pricing system
 

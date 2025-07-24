@@ -270,82 +270,82 @@ Config.StockAlerts = {
 }
 
 -- Market Configuration
--- Config.MarketPricing = {
---     -- Enable/disable dynamic pricing
---     enabled = true,
+Config.MarketPricing = {
+    -- Enable/disable dynamic pricing
+    enabled = true,
     
---     -- Base pricing factors
---     factors = {
---         stockLevel = {
---             enabled = true,
---             weight = 0.4,           -- 40% of price calculation
---             criticalMultiplier = 2.5, -- 5% stock = 2.5x price
---             lowMultiplier = 1.8,      -- 20% stock = 1.8x price
---             moderateMultiplier = 1.3, -- 50% stock = 1.3x price
---             healthyMultiplier = 1.0   -- 80%+ stock = normal price
---         },
+    -- Base pricing factors
+    factors = {
+        stockLevel = {
+            enabled = true,
+            weight = 0.4,           -- 40% of price calculation
+            criticalMultiplier = 2.5, -- 5% stock = 2.5x price
+            lowMultiplier = 1.8,      -- 20% stock = 1.8x price
+            moderateMultiplier = 1.3, -- 50% stock = 1.3x price
+            healthyMultiplier = 1.0   -- 80%+ stock = normal price
+        },
         
---         demand = {
---             enabled = true,
---             weight = 0.3,           -- 30% of price calculation
---             analysisWindow = 6,     -- Hours to analyze demand
---             highDemandMultiplier = 1.5,
---             normalDemandMultiplier = 1.0,
---             lowDemandMultiplier = 0.9
---         },
+        demand = {
+            enabled = true,
+            weight = 0.3,           -- 30% of price calculation
+            analysisWindow = 6,     -- Hours to analyze demand
+            highDemandMultiplier = 1.5,
+            normalDemandMultiplier = 1.0,
+            lowDemandMultiplier = 0.9
+        },
         
---         playerActivity = {
---             enabled = true,
---             weight = 0.2,           -- 20% of price calculation
---             peakThreshold = 25,     -- 25+ players = peak pricing
---             moderateThreshold = 15, -- 15+ players = moderate pricing
---             lowThreshold = 5,       -- 5+ players = low pricing
---             peakMultiplier = 1.3,
---             moderateMultiplier = 1.1,
---             lowMultiplier = 0.9
---         },
+        playerActivity = {
+            enabled = true,
+            weight = 0.2,           -- 20% of price calculation
+            peakThreshold = 25,     -- 25+ players = peak pricing
+            moderateThreshold = 15, -- 15+ players = moderate pricing
+            lowThreshold = 5,       -- 5+ players = low pricing
+            peakMultiplier = 1.3,
+            moderateMultiplier = 1.1,
+            lowMultiplier = 0.9
+        },
         
---         timeOfDay = {
---             enabled = true,
---             weight = 0.1,           -- 10% of price calculation
---             peakHours = {19, 20, 21, 22}, -- 7PM-10PM peak hours
---             moderateHours = {16, 17, 18, 23}, -- 4PM-6PM, 11PM moderate
---             peakMultiplier = 1.2,
---             moderateMultiplier = 1.05,
---             offPeakMultiplier = 0.95
---         }
---     },
+        timeOfDay = {
+            enabled = true,
+            weight = 0.1,           -- 10% of price calculation
+            peakHours = {19, 20, 21, 22}, -- 7PM-10PM peak hours
+            moderateHours = {16, 17, 18, 23}, -- 4PM-6PM, 11PM moderate
+            peakMultiplier = 1.2,
+            moderateMultiplier = 1.05,
+            offPeakMultiplier = 0.95
+        }
+    },
     
---     -- Price limits
---     limits = {
---         minMultiplier = 0.7,    -- Never go below 70% of base price
---         maxMultiplier = 3.0,    -- Never go above 300% of base price
---         maxChangePerUpdate = 0.1 -- Max 10% change per update cycle
---     },
+    -- Price limits
+    limits = {
+        minMultiplier = 0.7,    -- Never go below 70% of base price
+        maxMultiplier = 3.0,    -- Never go above 300% of base price
+        maxChangePerUpdate = 0.1 -- Max 10% change per update cycle
+    },
     
---     -- Update intervals
---     intervals = {
---         priceUpdate = 300,      -- Update prices every 5 minutes
---         marketSnapshot = 1800,  -- Save market snapshot every 30 minutes
---         demandAnalysis = 3600   -- Analyze demand every hour
---     },
+    -- Update intervals
+    intervals = {
+        priceUpdate = 300,      -- Update prices every 5 minutes
+        marketSnapshot = 1800,  -- Save market snapshot every 30 minutes
+        demandAnalysis = 3600   -- Analyze demand every hour
+    },
     
---     -- Special events (temporary price modifications)
---     events = {
---         shortage = {
---             enabled = true,
---             threshold = 3,      -- Items with <3% stock
---             multiplier = 2.0,   -- 2x base multiplier
---             duration = 3600     -- 1 hour duration
---         },
---         surplus = {
---             enabled = true,
---             threshold = 95,     -- Items with >95% stock
---             multiplier = 0.8,   -- 20% discount
---             duration = 1800     -- 30 minute duration
---         }
---     }
--- }
+    -- Special events (temporary price modifications)
+    events = {
+        shortage = {
+            enabled = true,
+            threshold = 3,      -- Items with <3% stock
+            multiplier = 2.0,   -- 2x base multiplier
+            duration = 3600     -- 1 hour duration
+        },
+        surplus = {
+            enabled = true,
+            threshold = 95,     -- Items with >95% stock
+            multiplier = 0.8,   -- 20% discount
+            duration = 1800     -- 30 minute duration
+        }
+    }
+}
 
 -- Emergency Order Configuration
 Config.EmergencyOrders = {
@@ -513,73 +513,73 @@ Config.AchievementVehicles = {
     }
 }
 
--- ============================================
--- MARKET-DYNAMIC NPC DELIVERY SYSTEM
--- NPCs only available during surplus conditions
--- ============================================
+-- -- ============================================
+-- -- MARKET-DYNAMIC NPC DELIVERY SYSTEM
+-- -- NPCs only available during surplus conditions
+-- -- ============================================
 
-Config.NPCDeliverySystem = {
-    enabled = true,
+-- Config.NPCDeliverySystem = {
+--     enabled = true,
     
-    -- Surplus thresholds that enable NPC jobs
-    surplusThresholds = {
-        moderate_surplus = {
-            stockPercentage = 80,           -- 80% of max warehouse stock
-            npcPayMultiplier = 0.7,         -- NPCs get 70% of player pay
-            maxConcurrentJobs = 1,          -- Only 1 NPC job at a time
-            cooldownMinutes = 30,           -- 30 min cooldown between NPC jobs
-            playerRequirement = "initiate", -- Player must start the job
-            description = "Moderate surplus - basic NPC assistance available"
-        },
+--     -- Surplus thresholds that enable NPC jobs
+--     surplusThresholds = {
+--         moderate_surplus = {
+--             stockPercentage = 80,           -- 80% of max warehouse stock
+--             npcPayMultiplier = 0.7,         -- NPCs get 70% of player pay
+--             maxConcurrentJobs = 1,          -- Only 1 NPC job at a time
+--             cooldownMinutes = 30,           -- 30 min cooldown between NPC jobs
+--             playerRequirement = "initiate", -- Player must start the job
+--             description = "Moderate surplus - basic NPC assistance available"
+--         },
         
-        high_surplus = {
-            stockPercentage = 90,           -- 90% of max warehouse stock  
-            npcPayMultiplier = 0.8,         -- NPCs get 80% of player pay
-            maxConcurrentJobs = 2,          -- Up to 2 concurrent NPC jobs
-            cooldownMinutes = 20,           -- 20 min cooldown
-            playerRequirement = "initiate", -- Still requires player initiation
-            description = "High surplus - enhanced NPC assistance available"
-        },
+--         high_surplus = {
+--             stockPercentage = 90,           -- 90% of max warehouse stock  
+--             npcPayMultiplier = 0.8,         -- NPCs get 80% of player pay
+--             maxConcurrentJobs = 2,          -- Up to 2 concurrent NPC jobs
+--             cooldownMinutes = 20,           -- 20 min cooldown
+--             playerRequirement = "initiate", -- Still requires player initiation
+--             description = "High surplus - enhanced NPC assistance available"
+--         },
         
-        critical_surplus = {
-            stockPercentage = 95,           -- 95% of max warehouse stock
-            npcPayMultiplier = 0.9,         -- NPCs get 90% of player pay
-            maxConcurrentJobs = 3,          -- Up to 3 concurrent NPC jobs
-            cooldownMinutes = 15,           -- 15 min cooldown
-            playerRequirement = "initiate", -- Player must still initiate
-            emergencyMode = true,           -- Special emergency mode
-            description = "Critical surplus - maximum NPC assistance to clear backlog"
-        }
-    },
+--         critical_surplus = {
+--             stockPercentage = 95,           -- 95% of max warehouse stock
+--             npcPayMultiplier = 0.9,         -- NPCs get 90% of player pay
+--             maxConcurrentJobs = 3,          -- Up to 3 concurrent NPC jobs
+--             cooldownMinutes = 15,           -- 15 min cooldown
+--             playerRequirement = "initiate", -- Player must still initiate
+--             emergencyMode = true,           -- Special emergency mode
+--             description = "Critical surplus - maximum NPC assistance to clear backlog"
+--         }
+--     },
     
-    -- NPC behavior settings
-    npcBehavior = {
-        guaranteedCompletion = true,        -- NPCs always complete jobs (no skill factor)
-        randomFailureChance = 0.05,         -- 5% chance of "breakdown" or delay
-        baseCompletionTime = 300,           -- 5 minutes base completion time
-        timeVariation = 120,                -- ±2 minutes random variation
-        noTimeBonus = true,                 -- NPCs don't get speed bonuses
-        noQualityBonus = true,              -- NPCs don't get quality bonuses
-        basicPayOnly = true,                -- NPCs only get basic delivery pay
-    },
+--     -- NPC behavior settings
+--     npcBehavior = {
+--         guaranteedCompletion = true,        -- NPCs always complete jobs (no skill factor)
+--         randomFailureChance = 0.05,         -- 5% chance of "breakdown" or delay
+--         baseCompletionTime = 300,           -- 5 minutes base completion time
+--         timeVariation = 120,                -- ±2 minutes random variation
+--         noTimeBonus = true,                 -- NPCs don't get speed bonuses
+--         noQualityBonus = true,              -- NPCs don't get quality bonuses
+--         basicPayOnly = true,                -- NPCs only get basic delivery pay
+--     },
     
-    -- Integration with market dynamics
-    marketIntegration = {
-        reducesPrices = true,               -- NPC deliveries slightly reduce market prices
-        priceReductionFactor = 0.02,        -- 2% price reduction per NPC delivery
-        preventsMarketCrash = true,         -- Helps prevent market crashes from oversupply
-        balancingEffect = true,             -- Helps balance supply/demand automatically
-    },
+--     -- Integration with market dynamics
+--     marketIntegration = {
+--         reducesPrices = true,               -- NPC deliveries slightly reduce market prices
+--         priceReductionFactor = 0.02,        -- 2% price reduction per NPC delivery
+--         preventsMarketCrash = true,         -- Helps prevent market crashes from oversupply
+--         balancingEffect = true,             -- Helps balance supply/demand automatically
+--     },
     
-    -- Player interaction requirements
-    playerRequirements = {
-        mustBeOnDuty = true,                -- Player must be on warehouse duty
-        mustInitiateJob = true,             -- Player must manually start NPC jobs
-        cannotBePassive = true,             -- No passive income generation
-        limitPerPlayer = 2,                 -- Max 2 NPC jobs per player per cooldown period
-        requiresWarehouseAccess = true,     -- Must have warehouse job access
-    }
-}
+--     -- Player interaction requirements
+--     playerRequirements = {
+--         mustBeOnDuty = true,                -- Player must be on warehouse duty
+--         mustInitiateJob = true,             -- Player must manually start NPC jobs
+--         cannotBePassive = true,             -- No passive income generation
+--         limitPerPlayer = 2,                 -- Max 2 NPC jobs per player per cooldown period
+--         requiresWarehouseAccess = true,     -- Must have warehouse job access
+--     }
+-- }
 
 Config.SystemIntegration = {
     achievements = {
@@ -591,7 +591,7 @@ Config.SystemIntegration = {
     },
     
     npcSystem = {
-        enabled = true,
+        enabled = false,
         requireSurplus = true,
         allowPassiveIncome = false,
         maxConcurrentPerPlayer = 2,

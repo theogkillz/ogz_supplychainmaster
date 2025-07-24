@@ -1,7 +1,7 @@
 -- ============================================
 -- SERVER-SIDE ACHIEVEMENT TRACKING
 -- ============================================
-
+local QBCore = exports['qb-core']:GetCoreObject()
 -- Validate job access for achievement functions
 local function hasAchievementAccess(source)
     local Player = QBCore.Functions.GetPlayer(source)

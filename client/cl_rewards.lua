@@ -25,7 +25,7 @@ AddEventHandler("rewards:showDriverStatus", function(playerStats)
                 playerStats.current_streak or 0,
                 playerStats.best_streak or 0
             ),
-            disabled = true
+            disabled = false
         },
         {
             title = "⏱️ Speed Performance",
@@ -35,7 +35,7 @@ AddEventHandler("rewards:showDriverStatus", function(playerStats)
                 formatTime(playerStats.fastest_time or 0),
                 playerStats.perfect_deliveries or 0
             ),
-            disabled = true
+            disabled = false
         },
         {
             title = "📦 Volume Statistics", 
@@ -45,7 +45,7 @@ AddEventHandler("rewards:showDriverStatus", function(playerStats)
                 playerStats.total_deliveries > 0 and (playerStats.total_boxes / playerStats.total_deliveries) or 0,
                 playerStats.largest_delivery or 0
             ),
-            disabled = true
+            disabled = false
         }
     }
 
