@@ -62,9 +62,28 @@ local function calculateDeliveryBoxes(orders)
     return boxesNeeded, containersNeeded, totalItems, itemsList
 end
 
+-- Select appropriate vehicle based on box count
+local function selectDeliveryVehicle(boxCount)
+    local vehicleModel = "speedo" -- Default
+    
+    if Config.VehicleSelection then
+        if boxCount <= Config.VehicleSelection.small.maxBoxes then
+            vehicleModel = Config.VehicleSelection.small.models[1]
+        elseif boxCount <= Config.VehicleSelection.medium.maxBoxes then
+            vehicleModel = Config.VehicleSelection.medium.models[math.random(#Config.VehicleSelection.medium.models)]
+        else
+            vehicleModel = Config.VehicleSelection.large.models[math.random(#Config.VehicleSelection.large.models)]
+        end
+    end
+    
+    return vehicleModel
+end
+
+-- Warehouse Targets and Peds
 -- Warehouse Targets and Peds
 Citizen.CreateThread(function()
     for index, warehouse in ipairs(Config.WarehousesLocation) do
+        -- Create target zone
         exports.ox_target:addBoxZone({
             coords = warehouse.position,
             size = vector3(1.0, 0.5, 3.5),
@@ -75,14 +94,26 @@ Citizen.CreateThread(function()
                     name = "warehouse_processing_" .. tostring(index),
                     icon = "fas fa-box",
                     label = "Process Orders",
-                    jobs = Config.Jobs.warehouse, -- Use jobs array instead of groups
+                    jobs = Config.Jobs.warehouse,
                     onSelect = function()
-                        TriggerEvent("warehouse:openProcessingMenu")
+                        -- Add animation
+                        local animDict = "anim@heists@prison_heiststation@cop_reactions"
+                        local animName = "cop_b_idle"
+                        RequestAnimDict(animDict)
+                        while not HasAnimDictLoaded(animDict) do
+                            Wait(10)
+                        end
+                        TaskPlayAnim(PlayerPedId(), animDict, animName, 8.0, -8.0, 1500, 0, 0, false, false, false)
+                        
+                        Wait(1500)
+                        -- Pass warehouse ID to menu
+                        TriggerEvent("warehouse:openProcessingMenu", index)
                     end
                 }
             }
         })
 
+        -- Create ped
         local pedModel = GetHashKey(warehouse.pedhash)
         RequestModel(pedModel)
         while not HasModelLoaded(pedModel) do
@@ -95,22 +126,26 @@ Citizen.CreateThread(function()
         SetEntityInvincible(ped, true)
         SetModelAsNoLongerNeeded(pedModel)
 
+        -- Create blip with dynamic color
         local blip = AddBlipForCoord(warehouse.position.x, warehouse.position.y, warehouse.position.z)
         SetBlipSprite(blip, 473)
         SetBlipDisplay(blip, 4)
         SetBlipScale(blip, 0.6)
-        SetBlipColour(blip, 16)
+        SetBlipColour(blip, GetWarehouseBlipColor(index))
         SetBlipAsShortRange(blip, true)
         BeginTextCommandSetBlipName("STRING")
-        AddTextComponentString("Warehouse")
+        AddTextComponentString(GetWarehouseName(index))
         EndTextCommandSetBlipName(blip)
         Citizen.Wait(0)
     end
 end)
 
--- Warehouse Menu
+-- CLEAN Warehouse Menu - Removed non-existent options
 RegisterNetEvent("warehouse:openProcessingMenu")
-AddEventHandler("warehouse:openProcessingMenu", function()
+AddEventHandler("warehouse:openProcessingMenu", function(warehouseId)
+    -- Store current warehouse ID
+    currentWarehouseId = warehouseId or 1
+    
     -- Validate job access
     if not hasWarehouseAccess() then
         local PlayerData = QBCore.Functions.GetPlayerData()
@@ -127,43 +162,34 @@ AddEventHandler("warehouse:openProcessingMenu", function()
         return
     end
     
+    local warehouseName = GetWarehouseName(currentWarehouseId)
+    
     local options = {
         { 
-            title = "View Stock", 
-            description = "Check warehouse inventory levels",
-            icon = "fas fa-warehouse",
-            onSelect = function() TriggerServerEvent("warehouse:getStocks") end 
-        },
-        { 
-            title = "View Orders", 
+            title = "📦 View Orders", 
             description = "Process pending delivery orders",
             icon = "fas fa-clipboard-list",
-            onSelect = function() TriggerServerEvent("warehouse:getPendingOrders") end 
+            onSelect = function() 
+                -- Pass warehouse ID to server
+                TriggerServerEvent("warehouse:getPendingOrders", currentWarehouseId) 
+            end 
         },
-        -- {
-        --     title = "🚨 Stock Alerts Dashboard",
-        --     description = "Monitor inventory levels and predictions",
-        --     icon = "fas fa-chart-line",
-        --     onSelect = function()
-        --         TriggerEvent("stockalerts:openDashboard")
-        --     end
-        -- },
-        -- {
-        --     title = "📦 Restock Suggestions",
-        --     description = "AI-powered reorder recommendations",
-        --     icon = "fas fa-magic",
-        --     onSelect = function()
-        --         TriggerServerEvent("stockalerts:getSuggestions")
-        --     end
-        -- },
-        --         {
-        --     title = "🤖 NPC Delivery Management",
-        --     description = "Manage NPC drivers for surplus inventory",
-        --     icon = "fas fa-robot",
-        --     onSelect = function()
-        --         TriggerEvent("npc:openManagementMenu")
-        --     end
-        -- },
+        { 
+            title = "📊 View Stock", 
+            description = "Check warehouse inventory levels",
+            icon = "fas fa-warehouse",
+            onSelect = function() 
+                TriggerServerEvent("warehouse:getStocks", currentWarehouseId) 
+            end 
+        },
+        {
+            title = "🚨 Stock Alerts",
+            description = "View low stock warnings and predictions",
+            icon = "fas fa-exclamation-triangle",
+            onSelect = function()
+                TriggerServerEvent("stockalerts:getAlerts", currentWarehouseId)
+            end
+        },
         {
             title = "🏆 Driver Leaderboards",
             description = "View top performing drivers and rankings",
@@ -189,17 +215,31 @@ AddEventHandler("warehouse:openProcessingMenu", function()
             end
         },
         {
-            title = "🏆 My Achievement Status",
-            description = "View vehicle performance tier and progress",
+            title = "🏆 Achievement Progress",
+            description = "View achievement progress and vehicle tier",
             icon = "fas fa-medal",
             onSelect = function()
-                TriggerServerEvent("achievements:getPlayerTier")
+                TriggerServerEvent("achievements:getProgress")
             end
         },
     }
+    
+    -- Add specialization info if enabled
+    if Config.WarehouseSpecialization.enabled then
+        local warehouse = Config.WarehousesLocation[currentWarehouseId]
+        if warehouse and warehouse.specialization then
+            table.insert(options, 1, {
+                title = "📍 " .. warehouseName,
+                description = "Specializes in: " .. warehouse.specialization.type,
+                icon = "fas fa-warehouse",
+                disabled = true
+            })
+        end
+    end
+    
     lib.registerContext({
         id = "main_menu",
-        title = "🏢 Hurst Industries - Warehouse Operations",
+        title = "🏢 " .. warehouseName,
         options = options
     })
     lib.showContext("main_menu")
@@ -238,8 +278,18 @@ AddEventHandler("warehouse:showOrderDetails", function(orders)
             table.insert(itemList, item.quantity .. "x " .. itemLabel)
         end
         
+        -- Determine order size label
+        local sizeLabel = ""
+        if boxesNeeded <= 3 then
+            sizeLabel = "🟢 Small Order"
+        elseif boxesNeeded <= 7 then
+            sizeLabel = "🟡 Medium Order"
+        else
+            sizeLabel = "🔴 Large Order"
+        end
+        
         table.insert(options, {
-            title = "Order: " .. orderGroup.orderGroupId,
+            title = sizeLabel .. " - Order: " .. orderGroup.orderGroupId,
             description = string.format("📦 %d boxes (%d containers)\n🏪 %s\n📋 %s\n💰 $%d", 
                 boxesNeeded,
                 containersNeeded,
@@ -316,8 +366,14 @@ AddEventHandler("restaurant:showStockDetails", function(stock, query)
         if string.find(string.lower(ingredient), string.lower(query)) then
             local itemData = itemNames[ingredient]
             local label = itemData and itemData.label or ingredient
+            
+            -- Add visual indicator for stock levels
+            local stockIcon = "🟢"
+            if quantity < 50 then stockIcon = "🔴"
+            elseif quantity < 100 then stockIcon = "🟡" end
+            
             table.insert(options, {
-                title = string.format("Ingredient: %s | Quantity: %d", label, quantity)
+                title = string.format("%s %s | Quantity: %d", stockIcon, label, quantity)
             })
         end
     end
@@ -330,22 +386,26 @@ AddEventHandler("restaurant:showStockDetails", function(stock, query)
 end)
 
 -- ===================================
--- DELIVERY SYSTEM
+-- ENHANCED DELIVERY SYSTEM WITH VEHICLE SELECTION
 -- ===================================
 
--- Enhanced Spawn Delivery Van with Multi-Box Support
+-- Enhanced Spawn Delivery Van with Multi-Box Support and Vehicle Selection
 RegisterNetEvent("warehouse:spawnVehicles")
-AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
+AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders, assignedWarehouseId)
     local boxesNeeded, containersNeeded, totalItems, itemsList = calculateDeliveryBoxes(orders)
     
     print("[DEBUG] Delivery calculated:", boxesNeeded, "boxes,", containersNeeded, "containers for", totalItems, "items")
+    print("[DEBUG] Assigned to warehouse:", assignedWarehouseId or currentWarehouseId or 1)
     
-    local warehouseConfig = Config.Warehouses[1]
-    if not warehouseConfig then
-        print("[ERROR] No warehouse configuration found")
+    -- Use assigned warehouse or current warehouse
+    local warehouseId = assignedWarehouseId or currentWarehouseId or 1
+    local warehouseBays = GetWarehouseBays(warehouseId)
+    
+    if #warehouseBays == 0 then
+        print("[ERROR] No active bays for warehouse", warehouseId)
         lib.notify({
             title = "Error",
-            description = "No warehouse configuration found.",
+            description = "No loading bays available at this warehouse.",
             type = "error",
             duration = 10000,
             position = Config.UI.notificationPosition,
@@ -353,20 +413,30 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
         })
         return
     end
-
+    
+    -- Select a random available bay
+    local selectedBay = warehouseBays[math.random(#warehouseBays)]
+    
+    -- Rest of the spawn code remains the same, just use selectedBay instead of Config.Warehouses[1]
+    local warehouseConfig = selectedBay
+    
     -- Dynamic delivery briefing based on order size
     local briefingText = ""
-    if boxesNeeded == 1 then
-        briefingText = "Small delivery: Load 1 box with " .. containersNeeded .. " containers."
-    elseif boxesNeeded <= 3 then
+    local vehicleType = ""
+    if boxesNeeded <= 3 then
+        briefingText = "Small delivery: Load " .. boxesNeeded .. " box(es) with " .. containersNeeded .. " containers."
+        vehicleType = "Standard Van"
+    elseif boxesNeeded <= 7 then
         briefingText = "Medium delivery: Load " .. boxesNeeded .. " boxes (" .. containersNeeded .. " containers total)."
+        vehicleType = "Delivery Truck"
     else
         briefingText = "LARGE DELIVERY: Load " .. boxesNeeded .. " boxes (" .. containersNeeded .. " containers total). This is a big order!"
+        vehicleType = "Heavy Truck"
     end
 
     lib.alertDialog({
         header = "📦 New Delivery Job",
-        content = briefingText,
+        content = briefingText .. "\n\nVehicle: " .. vehicleType .. "\nLoading Bay: " .. GetWarehouseName(warehouseId),
         centered = true,
         cancel = true
     })
@@ -375,7 +445,7 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
     Citizen.Wait(2500)
 
     local playerPed = PlayerPedId()
-    local vehicleModel = GetHashKey("speedo")
+    local vehicleModel = GetHashKey(selectDeliveryVehicle(boxesNeeded))
     
     RequestModel(vehicleModel)
     while not HasModelLoaded(vehicleModel) do
@@ -390,6 +460,11 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
     SetVehicleEngineOn(van, true, true, false)
     SetEntityCleanupByEngine(van, false)
     
+    -- Apply achievement-based vehicle mods if enabled
+    if Config.AchievementVehicles and Config.AchievementVehicles.enabled then
+        TriggerServerEvent("achievements:applyVehicleMods", NetworkGetNetworkIdFromEntity(van))
+    end
+    
     local vanPlate = GetVehicleNumberPlateText(van)
     TriggerEvent("vehiclekeys:client:SetOwner", vanPlate)
 
@@ -401,7 +476,7 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
     DoScreenFadeIn(2500)
 
     lib.notify({
-        title = "📦 " .. (boxesNeeded > 3 and "LARGE " or "") .. "Delivery Ready",
+        title = "📦 " .. (boxesNeeded > 7 and "LARGE " or boxesNeeded > 3 and "MEDIUM " or "") .. "Delivery Ready",
         description = boxesNeeded .. " boxes (" .. containersNeeded .. " containers) need loading",
         type = "success",
         duration = 10000,
@@ -419,6 +494,7 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
     end
 end)
 
+-- [REST OF THE FILE REMAINS THE SAME FROM LINE 319 ONWARDS...]
 -- Single Box Loading System (for small orders)
 RegisterNetEvent("warehouse:loadBoxes")
 AddEventHandler("warehouse:loadBoxes", function(warehouseConfig, van, restaurantId, orders)
@@ -1234,6 +1310,31 @@ AddEventHandler("warehouse:deliverBoxWithMarker", function(restaurantId, van, or
     local playerPed = PlayerPedId()
     local targetName = "delivery_zone_" .. restaurantId .. "_" .. tostring(GetGameTimer())
 
+    -- Create visual marker at delivery location
+    Citizen.CreateThread(function()
+        while DoesEntityExist(boxProp) do
+            DrawMarker(
+                Config.DeliveryProps.deliveryMarker.type,
+                deliverBoxPosition.x, deliverBoxPosition.y, deliverBoxPosition.z,
+                0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0,
+                Config.DeliveryProps.deliveryMarker.size.x,
+                Config.DeliveryProps.deliveryMarker.size.y,
+                Config.DeliveryProps.deliveryMarker.size.z,
+                Config.DeliveryProps.deliveryMarker.color.r,
+                Config.DeliveryProps.deliveryMarker.color.g,
+                Config.DeliveryProps.deliveryMarker.color.b,
+                Config.DeliveryProps.deliveryMarker.color.a,
+                Config.DeliveryProps.deliveryMarker.bobUpAndDown,
+                Config.DeliveryProps.deliveryMarker.faceCamera,
+                2,
+                Config.DeliveryProps.deliveryMarker.rotate,
+                nil, nil, false
+            )
+            Citizen.Wait(0)
+        end
+    end)
+
     -- Create delivery target zone
     exports.ox_target:addBoxZone({
         coords = vector3(deliverBoxPosition.x, deliverBoxPosition.y, deliverBoxPosition.z + 0.5),
@@ -1337,7 +1438,7 @@ AddEventHandler("warehouse:returnTruck", function(van, restaurantId, orders)
     print("[DEBUG] Returning van")
     lib.alertDialog({
         header = "Delivery Complete",
-        content = "Great Work! Stock has been delivered and updated.",
+        content = "Great Work! Stock has been delivered and updated. Return the van to the warehouse for your payment.",
         centered = true,
         cancel = true
     })
