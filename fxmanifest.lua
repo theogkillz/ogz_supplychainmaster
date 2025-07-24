@@ -79,6 +79,7 @@ server_scripts {
     -- Communication Systems
     'server/sv_notifications.lua',
     'server/integrations/sv_lbphone_integration.lua',
+    'server/sv_duty_emails.lua',
     
     -- Administration
     'server/sv_admin.lua'
