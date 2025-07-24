@@ -1,94 +1,71 @@
 local QBCore = exports['qb-core']:GetCoreObject()
 
 -- ===============================================
--- PERMISSION CHECKING FUNCTIONS (DEFINED FIRST)
+-- ADMIN CONFIGURATION
 -- ===============================================
 
--- Enhanced permission checking with multiple methods
-local function hasAdminPermission(source, level)
-    local xPlayer = QBCore.Functions.GetPlayer(source)
-    if not xPlayer then return false end
-    
-    -- Try multiple permission methods for compatibility
-    local group = nil
-    
-    -- Method 1: QBCore.Functions.GetPermission
-    if QBCore.Functions.GetPermission then
-        group = QBCore.Functions.GetPermission(source)
-    end
-    
-    -- Method 2: Check player job (fallback)
-    if not group and xPlayer.PlayerData and xPlayer.PlayerData.job then
-        group = xPlayer.PlayerData.job.name
-    end
-    
-    -- Method 3: Check metadata (another fallback)
-    if not group and xPlayer.PlayerData and xPlayer.PlayerData.metadata then
-        group = xPlayer.PlayerData.metadata.group or xPlayer.PlayerData.metadata.permission
-    end
-    
-    -- Debug logging
-    print(string.format("[ADMIN DEBUG] Player: %s, Group: %s, Required: %s", 
-        xPlayer.PlayerData.citizenid or "unknown", 
-        group or "none", 
-        level or "none"))
-    
-    if not group then
-        print("[ADMIN ERROR] Could not determine player permission group")
-        return false
-    end
-    
-    -- Permission hierarchy check
-    local godPermissions = {"god", "admin", "superadmin", "owner"}
-    local adminPermissions = {"admin", "moderator", "mod"}
-    
-    if level == 'superadmin' then
-        for _, perm in ipairs(godPermissions) do
-            if group == perm then return true end
-        end
-        return false
-    elseif level == 'admin' then
-        for _, perm in ipairs(godPermissions) do
-            if group == perm then return true end
-        end
-        for _, perm in ipairs(adminPermissions) do
-            if group == perm then return true end
-        end
-        return false
-    elseif level == 'moderator' then
-        -- Any admin level can access moderator features
-        for _, perm in ipairs(godPermissions) do
-            if group == perm then return true end
-        end
-        for _, perm in ipairs(adminPermissions) do
-            if group == perm then return true end
-        end
-        return false
-    end
-    
-    return false
-end
+-- Add your admin license2 identifiers here
+local AdminList = {
+    ["license2:02e93de433b665fc9572546e584552674c49978d"] = "superadmin",
+    -- Add your admins below:
+    ["license2:7c244f49f115502178c9efc54efa183bc4ddb49d"] = "admin", -- Kat
+    ["license2:a374445a04dd4245baa057b5a951f7e73afae6fc"] = "moderator", -- Nuttzie
+}
 
--- Alternative simple check for testing
-local function hasSimpleAdminPermission(source)
+-- ===============================================
+-- PERMISSION CHECKING FUNCTIONS (SIMPLIFIED)
+-- ===============================================
+
+-- Main permission check function
+local function hasAdminPermission(source, requiredLevel)
     local xPlayer = QBCore.Functions.GetPlayer(source)
     if not xPlayer then return false end
     
-    -- Simple job-based check for Hurst Industries management
-    if xPlayer.PlayerData.job and xPlayer.PlayerData.job.name == "hurst" then
-        if xPlayer.PlayerData.job.isboss or xPlayer.PlayerData.job.grade.level >= 3 then
-            return true
+    -- Get player identifiers
+    local identifiers = GetPlayerIdentifiers(source)
+    local license2 = nil
+    
+    -- Find license2 identifier
+    for _, id in pairs(identifiers) do
+        if string.sub(id, 1, 9) == "license2:" then
+            license2 = id
+            break
         end
     end
     
-    -- Check if player has admin job/group
-    local group = QBCore.Functions.GetPermission and QBCore.Functions.GetPermission(source)
-    if group then
-        local adminGroups = {"god", "admin", "superadmin", "owner", "mod", "moderator"}
-        for _, adminGroup in ipairs(adminGroups) do
-            if group == adminGroup then
-                return true
-            end
+    -- Check 1: License2-based admin list
+    if license2 and AdminList[license2] then
+        local adminLevel = AdminList[license2]
+        print(string.format("[ADMIN] Player %s has admin level: %s", GetPlayerName(source), adminLevel))
+        
+        -- Check if their admin level meets requirement
+        if requiredLevel == "moderator" then
+            return true -- Any admin level can access moderator features
+        elseif requiredLevel == "admin" then
+            return adminLevel == "admin" or adminLevel == "superadmin"
+        elseif requiredLevel == "superadmin" then
+            return adminLevel == "superadmin"
+        end
+    end
+    
+    -- Check 2: Hurst boss grade
+    if xPlayer.PlayerData.job and xPlayer.PlayerData.job.name == "hurst" then
+        -- Check if boss or high grade
+        if xPlayer.PlayerData.job.isboss then
+            print(string.format("[ADMIN] Player %s has Hurst boss access", GetPlayerName(source)))
+            return true -- Boss has full access
+        elseif xPlayer.PlayerData.job.grade and xPlayer.PlayerData.job.grade.level >= 3 then
+            print(string.format("[ADMIN] Player %s has Hurst grade %d access", GetPlayerName(source), xPlayer.PlayerData.job.grade.level))
+            return true -- High grade has access
+        end
+    end
+    
+    -- Check 3: QBCore admin permissions (fallback)
+    if QBCore.Functions.HasPermission then
+        local hasQBPerm = QBCore.Functions.HasPermission(source, requiredLevel)
+        if hasQBPerm then
+            print(string.format("[ADMIN] Player %s has QBCore %s permission", GetPlayerName(source), requiredLevel))
+            return true
         end
     end
     
@@ -121,9 +98,22 @@ local function handleConsoleCommand(args)
             end
         end)
         
+    elseif action == 'addadmin' then
+        local license = args[2]
+        local level = args[3] or "admin"
+        
+        if license and string.sub(license, 1, 9) == "license2:" then
+            print(string.format("[ADMIN] Added %s with level %s to admin list", license, level))
+            print("[ADMIN] Remember to add this to your sv_admin.lua AdminList table!")
+            print(string.format('["%s"] = "%s",', license, level))
+        else
+            print("[ADMIN] Usage: supply addadmin license2:xxxxx [moderator/admin/superadmin]")
+        end
+        
     elseif action == 'help' then
         print('=== SUPPLY CHAIN CONSOLE COMMANDS ===')
         print('supply stats - Show system statistics')
+        print('supply addadmin - Show how to add an admin')
         print('supply help - Show this help menu')
         print('======================================')
         
@@ -134,7 +124,15 @@ end
 
 -- System stats function
 local function getSystemStats(source)
-    if not hasAdminPermission(source, 'moderator') then return end
+    if not hasAdminPermission(source, 'moderator') then 
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Access Denied',
+            description = 'You need admin or Hurst boss permissions.',
+            type = 'error',
+            duration = 5000
+        })
+        return 
+    end
     
     MySQL.Async.fetchAll([[
         SELECT 
@@ -166,83 +164,7 @@ local function getSystemStats(source)
     end)
 end
 
--- Market command handler
-local function handleMarketCommand(source, args)
-    if not hasAdminPermission(source, 'admin') then
-        TriggerClientEvent('ox_lib:notify', source, {
-            title = 'Access Denied',
-            description = 'Admin level required for market commands.',
-            type = 'error',
-            duration = 5000
-        })
-        return
-    end
-    
-    TriggerClientEvent('ox_lib:notify', source, {
-        title = 'Market Commands',
-        description = 'Use the admin menu for market management.',
-        type = 'info',
-        duration = 8000
-    })
-end
-
--- Reset command handler
-local function handleResetCommand(source, args)
-    if not hasAdminPermission(source, 'superadmin') then
-        TriggerClientEvent('ox_lib:notify', source, {
-            title = 'Access Denied',
-            description = 'Superadmin level required for reset commands.',
-            type = 'error',
-            duration = 5000
-        })
-        return
-    end
-    
-    TriggerClientEvent('ox_lib:notify', source, {
-        title = 'Reset Commands',
-        description = 'Use the admin menu for reset functions.',
-        type = 'info',
-        duration = 8000
-    })
-end
-
--- Emergency command handler
-local function handleEmergencyCommand(source, args)
-    if not hasAdminPermission(source, 'admin') then return end
-    
-    TriggerClientEvent('ox_lib:notify', source, {
-        title = 'Emergency Commands',
-        description = 'Use the admin menu for emergency management.',
-        type = 'info',
-        duration = 8000
-    })
-end
-
--- Export command handler
-local function handleExportCommand(source, args)
-    if not hasAdminPermission(source, 'admin') then return end
-    
-    TriggerClientEvent('ox_lib:notify', source, {
-        title = 'Export Commands',
-        description = 'Export functionality available in admin menu.',
-        type = 'info',
-        duration = 8000
-    })
-end
-
--- Reload command handler
-local function handleReloadCommand(source)
-    if not hasAdminPermission(source, 'superadmin') then return end
-    
-    TriggerClientEvent('ox_lib:notify', source, {
-        title = 'System Reloaded',
-        description = 'Key systems reinitialized.',
-        type = 'success',
-        duration = 8000
-    })
-end
-
--- System overview function
+-- System overview function for admin menu
 local function getSystemOverview(source, callback)
     MySQL.Async.fetchAll([[
         SELECT 
@@ -275,10 +197,10 @@ RegisterCommand('supplyjobreset', function(source, args, rawCommand)
     local targetId = tonumber(args[1]) or src
     
     -- Permission check
-    if src ~= 0 and not (hasAdminPermission(src, 'moderator') or hasSimpleAdminPermission(src)) then
+    if src ~= 0 and not hasAdminPermission(src, 'moderator') then
         TriggerClientEvent('ox_lib:notify', src, {
             title = 'Access Denied',
-            description = 'You need admin permissions to use this command.',
+            description = 'You need admin or Hurst boss permissions.',
             type = 'error',
             duration = 5000
         })
@@ -388,140 +310,6 @@ RegisterCommand('supplyjobreset', function(source, args, rawCommand)
     
 end, false)
 
--- Bulk reset command for multiple players
-RegisterCommand('supplyjobmassreset', function(source, args, rawCommand)
-    local src = source
-    
-    -- Only console or superadmin can use this
-    if src ~= 0 and not hasAdminPermission(src, 'superadmin') then
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = 'Access Denied',
-            description = 'Superadmin level required for mass reset.',
-            type = 'error',
-            duration = 5000
-        })
-        return
-    end
-    
-    -- Get all online players
-    local players = QBCore.Functions.GetPlayers()
-    local resetCount = 0
-    
-    if src == 0 then
-        print('[SUPPLY MASS RESET] Starting mass job reset for all online players...')
-    end
-    
-    for _, playerId in ipairs(players) do
-        local xPlayer = QBCore.Functions.GetPlayer(playerId)
-        if xPlayer then
-            -- Reset each player
-            TriggerClientEvent('supply:forceJobReset', playerId)
-            resetCount = resetCount + 1
-            
-            -- Small delay between resets to avoid overwhelming
-            Citizen.Wait(100)
-        end
-    end
-    
-    -- Clean up database
-    MySQL.Async.execute([[
-        UPDATE supply_orders SET status = 'pending' WHERE status = 'accepted';
-        DELETE FROM supply_team_members;
-        DELETE FROM supply_team_deliveries;
-    ]], {}, function(success)
-        if success then
-            local message = string.format('Mass job reset complete! Reset %d players and cleaned database.', resetCount)
-            if src == 0 then
-                print('[SUPPLY MASS RESET] ' .. message)
-            else
-                TriggerClientEvent('ox_lib:notify', src, {
-                    title = '✅ Mass Reset Complete',
-                    description = message,
-                    type = 'success',
-                    duration = 10000
-                })
-            end
-        end
-    end)
-    
-end, false)
-
--- Emergency supply chain system restart
-RegisterCommand('supplyemergencyrestart', function(source, args, rawCommand)
-    local src = source
-    
-    -- Only console or superadmin can use this
-    if src ~= 0 and not hasAdminPermission(src, 'superadmin') then
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = 'Access Denied',
-            description = 'Superadmin level required for emergency restart.',
-            type = 'error',
-            duration = 5000
-        })
-        return
-    end
-    
-    if src == 0 then
-        print('[SUPPLY EMERGENCY] Starting emergency system restart...')
-    else
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = '🚨 Emergency Restart',
-            description = 'Starting emergency supply chain system restart...',
-            type = 'warning',
-            duration = 5000
-        })
-    end
-    
-    -- Broadcast to all players
-    TriggerClientEvent('ox_lib:notify', -1, {
-        title = '🚨 SUPPLY CHAIN RESTART',
-        description = 'Emergency system restart in progress.\nPlease wait 10 seconds...',
-        type = 'warning',
-        duration = 10000
-    })
-    
-    -- Reset all players
-    local players = QBCore.Functions.GetPlayers()
-    for _, playerId in ipairs(players) do
-        TriggerClientEvent('supply:forceJobReset', playerId)
-    end
-    
-    -- Clean database
-    MySQL.Async.execute([[
-        UPDATE supply_orders SET status = 'pending' WHERE status = 'accepted';
-        DELETE FROM supply_team_members;
-        DELETE FROM supply_team_deliveries WHERE completed_at IS NULL;
-    ]], {}, function(success)
-        if success then
-            -- Restart key systems
-            Citizen.SetTimeout(3000, function()
-                TriggerEvent('stockalerts:initialize')
-                TriggerEvent('market:initialize')
-                
-                -- Notify completion
-                TriggerClientEvent('ox_lib:notify', -1, {
-                    title = '✅ SYSTEM RESTARTED',
-                    description = 'Supply chain system has been restarted.\nAll systems operational!',
-                    type = 'success',
-                    duration = 8000
-                })
-                
-                if src == 0 then
-                    print('[SUPPLY EMERGENCY] Emergency restart complete!')
-                else
-                    TriggerClientEvent('ox_lib:notify', src, {
-                        title = '✅ Emergency Restart Complete',
-                        description = 'All systems have been restarted successfully.',
-                        type = 'success',
-                        duration = 8000
-                    })
-                end
-            end)
-        end
-    end)
-    
-end, false)
-
 -- ===============================================
 -- MAIN ADMIN COMMAND
 -- ===============================================
@@ -539,43 +327,60 @@ RegisterCommand('supplytest', function(source, args, rawCommand)
         return
     end
     
-    local group = QBCore.Functions.GetPermission and QBCore.Functions.GetPermission(source)
+    -- Get player's license2
+    local identifiers = GetPlayerIdentifiers(source)
+    local license2 = nil
+    for _, id in pairs(identifiers) do
+        if string.sub(id, 1, 9) == "license2:" then
+            license2 = id
+            break
+        end
+    end
+    
     local job = xPlayer.PlayerData.job and xPlayer.PlayerData.job.name
     local grade = xPlayer.PlayerData.job and xPlayer.PlayerData.job.grade and xPlayer.PlayerData.job.grade.level
     local isBoss = xPlayer.PlayerData.job and xPlayer.PlayerData.job.isboss
+    local isInAdminList = license2 and AdminList[license2] and true or false
+    local adminLevel = license2 and AdminList[license2] or "none"
     
     TriggerClientEvent('ox_lib:notify', source, {
         title = '🔍 Permission Debug',
         description = string.format(
-            "**Group:** %s\n**Job:** %s\n**Grade:** %s\n**Boss:** %s\n**Simple Check:** %s\n**Admin Check:** %s",
-            group or "none",
+            "**License2:** %s\n**In Admin List:** %s\n**Admin Level:** %s\n**Job:** %s\n**Grade:** %s\n**Boss:** %s\n**Has Access:** %s",
+            license2 and "Found" or "Not Found",
+            isInAdminList and "✅ YES" or "❌ NO",
+            adminLevel,
             job or "none", 
             grade or "none",
             isBoss and "Yes" or "No",
-            hasSimpleAdminPermission(source) and "✅ PASS" or "❌ FAIL",
-            hasAdminPermission(source, 'moderator') and "✅ PASS" or "❌ FAIL"
+            hasAdminPermission(source, 'moderator') and "✅ GRANTED" or "❌ DENIED"
         ),
         type = 'info',
-        duration = 15000,
+        duration = 20000,
         position = 'top',
         markdown = true
     })
+    
+    -- Also print license2 to console for easy copying
+    if license2 then
+        print(string.format("[ADMIN] Player %s license2: %s", GetPlayerName(source), license2))
+        print(string.format("[ADMIN] To add as admin, add this line to AdminList table:"))
+        print(string.format('["%s"] = "admin",', license2))
+    end
 end, false)
 
--- MAIN ADMIN COMMAND with enhanced checking
+-- MAIN ADMIN COMMAND
 RegisterCommand('supply', function(source, args, rawCommand)
     if source == 0 then
         handleConsoleCommand(args)
         return
     end
     
-    -- Try both permission methods
-    local hasPermission = hasAdminPermission(source, 'moderator') or hasSimpleAdminPermission(source)
-    
-    if not hasPermission then
+    -- Check permissions
+    if not hasAdminPermission(source, 'moderator') then
         TriggerClientEvent('ox_lib:notify', source, {
             title = 'Access Denied',
-            description = 'You do not have permission to use admin commands.\nUse `/supplytest` to check your permissions.',
+            description = 'You need admin or Hurst boss permissions.\nUse `/supplytest` to check your access.',
             type = 'error',
             duration = 8000
         })
@@ -590,23 +395,20 @@ RegisterCommand('supply', function(source, args, rawCommand)
         return
     end
     
-    -- Handle specific commands with the enhanced permission check
+    -- Handle specific commands
     if action == 'stats' then
         getSystemStats(source)
-    elseif action == 'market' then
-        handleMarketCommand(source, args)
-    elseif action == 'reset' then
-        handleResetCommand(source, args)
-    elseif action == 'emergency' then
-        handleEmergencyCommand(source, args)
-    elseif action == 'export' then
-        handleExportCommand(source, args)
     elseif action == 'reload' then
-        handleReloadCommand(source)
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'System Reloaded',
+            description = 'Key systems reinitialized.',
+            type = 'success',
+            duration = 8000
+        })
     else
         TriggerClientEvent('ox_lib:notify', source, {
             title = 'Invalid Command',
-            description = 'Use /supply for the admin menu or /supply help for commands.',
+            description = 'Use /supply for the admin menu.',
             type = 'error',
             duration = 5000
         })
@@ -620,7 +422,15 @@ RegisterNetEvent('supply:requestAdminMenu')
 AddEventHandler('supply:requestAdminMenu', function()
     local src = source
     
-    if not hasAdminPermission(src, 'moderator') then return end
+    if not hasAdminPermission(src, 'moderator') then 
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Access Denied',
+            description = 'You need admin or Hurst boss permissions.',
+            type = 'error',
+            duration = 5000
+        })
+        return 
+    end
     
     -- Get system overview data
     getSystemOverview(src, function(data)
@@ -637,7 +447,15 @@ RegisterNetEvent('admin:adjustStock')
 AddEventHandler('admin:adjustStock', function(ingredient, newQuantity)
     local src = source
     
-    if not hasAdminPermission(src, 'admin') then return end
+    if not hasAdminPermission(src, 'admin') then 
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Access Denied',
+            description = 'Admin level required for stock adjustments.',
+            type = 'error',
+            duration = 5000
+        })
+        return 
+    end
     
     MySQL.Async.execute([[
         INSERT INTO supply_warehouse_stock (ingredient, quantity) 
@@ -664,18 +482,14 @@ end)
 
 -- Add command suggestions
 TriggerEvent('chat:addSuggestion', '/supply', 'Open Supply Chain Admin Menu', {
-    { name = 'action', help = 'stats/market/reset/emergency/export/reload' }
+    { name = 'action', help = 'stats/reload (optional)' }
 })
 
 TriggerEvent('chat:addSuggestion', '/supplyjobreset', 'Reset supply chain job for a player', {
     { name = 'playerid', help = 'Player server ID (optional - defaults to yourself)' }
 })
 
-TriggerEvent('chat:addSuggestion', '/supplyjobmassreset', 'Reset supply chain job for ALL online players')
-
-TriggerEvent('chat:addSuggestion', '/supplyemergencyrestart', 'Emergency restart of entire supply chain system')
-
-TriggerEvent('chat:addSuggestion', '/supplytest', 'Test your admin permissions')
+TriggerEvent('chat:addSuggestion', '/supplytest', 'Test your admin permissions and get your license2')
 
 -- ===============================================
 -- INITIALIZATION
@@ -683,7 +497,8 @@ TriggerEvent('chat:addSuggestion', '/supplytest', 'Test your admin permissions')
 AddEventHandler('onResourceStart', function(resourceName)
     if resourceName == GetCurrentResourceName() then
         print('[ADMIN] Supply Chain admin system loaded!')
-        print('[ADMIN] Use /supply for admin menu or "supply help" in console')
-        print('[ADMIN] Available commands: /supplyjobreset, /supplyjobmassreset, /supplyemergencyrestart')
+        print('[ADMIN] Use /supply for admin menu')
+        print('[ADMIN] Use /supplytest to get your license2 identifier')
+        print('[ADMIN] Add admins by adding their license2 to the AdminList table')
     end
 end)

@@ -362,49 +362,13 @@ AddEventHandler('update:stock', function(restaurantId, orders)
                 markdown = Config.UI.enableMarkdown
             })
             
-            local basePay = totalCost * Config.DriverPayPrec
-            local xPlayer = QBCore.Functions.GetPlayer(src)
             
-            if xPlayer then
-            -- Calculate delivery time and other data
-            local deliveryTime = orders[1].deliveryTime or 900 -- Default if missing
-            local totalBoxes = 0
             
-            -- Calculate total boxes properly
-            for _, order in ipairs(orders) do
-                local totalItems = 0
-                if order.items then
-                    for _, item in ipairs(order.items) do
-                        totalItems = totalItems + item.quantity
-                    end
-                else
-                    totalItems = order.quantity or 0
-                end
-                
-                local itemsPerContainer = (Config.ContainerSystem and Config.ContainerSystem.itemsPerContainer) or 12
-                local containersPerBox = (Config.ContainerSystem and Config.ContainerSystem.containersPerBox) or 5
-                local containersNeeded = math.ceil(totalItems / itemsPerContainer)
-                local boxesNeeded = math.ceil(containersNeeded / containersPerBox)
-                totalBoxes = totalBoxes + boxesNeeded
-            end
-            
-            -- THESE EVENTS MUST BE TRIGGERED:
-            TriggerEvent('rewards:calculateDeliveryReward', src, {
-                basePay = basePay,
-                deliveryTime = deliveryTime,
-                boxes = totalBoxes,
-                orderGroupId = orderGroupId,
-                totalCost = totalCost,
-                isPerfect = deliveryTime < 1200 -- Under 20 minutes = perfect
+            TriggerClientEvent('delivery:storeCompletionData', src, {
+                restaurantId = restaurantId,
+                orders = orders,
+                totalCost = totalCost
             })
-            
-            TriggerEvent('leaderboard:trackDelivery', src, {
-                boxes = totalBoxes,
-                deliveryTime = deliveryTime,
-                earnings = basePay,
-                isPerfect = deliveryTime < 1200
-            })
-        end
         else
             TriggerClientEvent('ox_lib:notify', src, {
                 title = 'Error',
@@ -533,5 +497,57 @@ AddEventHandler("warehouse:getStocksForOrder", function(restaurantId)
         restaurantId = restaurantId, 
         warehouseStock = stock, 
         dynamicPrices = dynamicPrices 
+    })
+end)
+
+RegisterNetEvent('delivery:requestPayment')
+AddEventHandler('delivery:requestPayment', function(deliveryData)
+    local src = source
+    local xPlayer = QBCore.Functions.GetPlayer(src)
+    
+    if not xPlayer or not deliveryData then
+        print("[ERROR] Invalid payment request")
+        return
+    end
+    
+    -- Calculate base pay
+    local basePay = math.floor(deliveryData.totalCost * Config.DriverPayPrec)
+    
+    -- Calculate total boxes
+    local totalBoxes = 0
+    for _, order in ipairs(deliveryData.orders) do
+        local totalItems = 0
+        if order.items then
+            for _, item in ipairs(order.items) do
+                totalItems = totalItems + item.quantity
+            end
+        else
+            totalItems = order.quantity or 0
+        end
+        
+        local itemsPerContainer = (Config.ContainerSystem and Config.ContainerSystem.itemsPerContainer) or 12
+        local containersPerBox = (Config.ContainerSystem and Config.ContainerSystem.containersPerBox) or 5
+        local containersNeeded = math.ceil(totalItems / itemsPerContainer)
+        local boxesNeeded = math.ceil(containersNeeded / containersPerBox)
+        totalBoxes = totalBoxes + boxesNeeded
+    end
+    
+    -- Now trigger the reward calculation
+    TriggerEvent('rewards:calculateDeliveryReward', src, {
+        basePay = basePay,
+        deliveryTime = deliveryData.deliveryTime,
+        boxes = totalBoxes,
+        orderGroupId = deliveryData.orders[1].orderGroupId,
+        totalCost = deliveryData.totalCost,
+        isPerfect = deliveryData.deliveryTime < 1200,
+        restaurantId = deliveryData.restaurantId
+    })
+    
+    -- Also trigger leaderboard tracking
+    TriggerEvent('leaderboard:trackDelivery', src, {
+        boxes = totalBoxes,
+        deliveryTime = deliveryData.deliveryTime,
+        earnings = basePay,
+        isPerfect = deliveryData.deliveryTime < 1200
     })
 end)

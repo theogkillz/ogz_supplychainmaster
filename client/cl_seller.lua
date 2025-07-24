@@ -91,7 +91,7 @@ AddEventHandler("seller:openSellMenu", function()
                             label = "Selling " .. label .. "...",
                             canCancel = false,
                             disable = { move = true, car = true, combat = true, sprint = true },
-                            anim = { dict = Config.SellingAnimDict, clip = Config.SellingAnimName },
+                            anim = { dict = "mp_common", clip = "givetake1_a", flag = 49 },
                             style = Config.UI.theme
                         }) then
                             TriggerServerEvent("farming:sellFruit", itemName, amount)

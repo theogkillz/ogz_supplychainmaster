@@ -11,6 +11,9 @@ local sendStockAlerts
 local getAlertIcon
 local getAlertColor
 
+-- Load LB-Phone integration if it exists
+local LBPhone = _G.LBPhone or nil
+
 -- Convert all config values to numbers once to prevent string comparison errors
 local THRESHOLDS = {
     critical = tonumber(Config.StockAlerts.thresholds.critical),
@@ -146,6 +149,100 @@ calculateTrend = function(usageData)
     end
 end
 
+-- Send combined stock alert email to warehouse workers
+local function sendWarehouseStockEmail(playerId, alerts)
+    if not LBPhone then return end
+    
+    local xPlayer = QBCore.Functions.GetPlayer(playerId)
+    if not xPlayer then return end
+    
+    local phoneNumber = xPlayer.PlayerData.charinfo.phone
+    if not phoneNumber then return end
+    
+    local itemNames = exports.ox_inventory:Items() or {}
+    
+    -- Group alerts by level
+    local criticalAlerts = {}
+    local lowAlerts = {}
+    local moderateAlerts = {}
+    
+    for _, alert in ipairs(alerts) do
+        if alert.alertLevel == "critical" then
+            table.insert(criticalAlerts, alert)
+        elseif alert.alertLevel == "low" then
+            table.insert(lowAlerts, alert)
+        else
+            table.insert(moderateAlerts, alert)
+        end
+    end
+    
+    -- Build email content
+    local emailContent = "<h2>📦 Warehouse Stock Alert Summary</h2><br>"
+    
+    -- Critical alerts
+    if #criticalAlerts > 0 then
+        emailContent = emailContent .. "<h3 style='color: red;'>🚨 CRITICAL ALERTS</h3>"
+        for _, alert in ipairs(criticalAlerts) do
+            local itemLabel = itemNames[alert.itemName] and itemNames[alert.itemName].label or alert.itemName
+            emailContent = emailContent .. string.format(
+                "<b>• %s:</b> <span style='color: red;'>%d units (%.1f%%)</span>",
+                itemLabel, alert.currentStock, alert.percentage
+            )
+            if alert.daysUntilStockout then
+                emailContent = emailContent .. string.format(" - <b>%.1f days until stockout!</b>", alert.daysUntilStockout)
+            end
+            emailContent = emailContent .. "<br>"
+        end
+        emailContent = emailContent .. "<br>"
+    end
+    
+    -- Low alerts
+    if #lowAlerts > 0 then
+        emailContent = emailContent .. "<h3 style='color: orange;'>⚠️ LOW STOCK WARNINGS</h3>"
+        for _, alert in ipairs(lowAlerts) do
+            local itemLabel = itemNames[alert.itemName] and itemNames[alert.itemName].label or alert.itemName
+            emailContent = emailContent .. string.format(
+                "<b>• %s:</b> %d units (%.1f%%)",
+                itemLabel, alert.currentStock, alert.percentage
+            )
+            if alert.prediction and alert.prediction.trend ~= "stable" then
+                emailContent = emailContent .. string.format(" - Trend: %s", alert.prediction.trend)
+            end
+            emailContent = emailContent .. "<br>"
+        end
+        emailContent = emailContent .. "<br>"
+    end
+    
+    -- Moderate alerts
+    if #moderateAlerts > 0 then
+        emailContent = emailContent .. "<h3 style='color: blue;'>📊 MODERATE STOCK LEVELS</h3>"
+        for _, alert in ipairs(moderateAlerts) do
+            local itemLabel = itemNames[alert.itemName] and itemNames[alert.itemName].label or alert.itemName
+            emailContent = emailContent .. string.format(
+                "<b>• %s:</b> %d units (%.1f%%)<br>",
+                itemLabel, alert.currentStock, alert.percentage
+            )
+        end
+    end
+    
+    emailContent = emailContent .. "<br><i>Check the warehouse Stock Alerts menu for detailed analysis and restock suggestions.</i>"
+    
+    -- Determine urgency for subject
+    local urgencyLevel = #criticalAlerts > 0 and "🚨 CRITICAL" or (#lowAlerts > 0 and "⚠️ LOW" or "📊 MODERATE")
+    
+    -- Send the email
+    local emailData = {
+        level = #criticalAlerts > 0 and "critical" or (#lowAlerts > 0 and "low" or "moderate"),
+        itemLabel = string.format("%d items need attention", #alerts),
+        percentage = 0, -- Not used for combined emails
+        currentStock = #alerts,
+        analysis = emailContent,
+        recommendedOrder = 0
+    }
+    
+    LBPhone.SendStockAlert(phoneNumber, emailData)
+end
+
 -- Generate stock alerts
 local function checkStockLevels()
     MySQL.Async.fetchAll('SELECT ingredient, SUM(quantity) as total_stock FROM supply_warehouse_stock GROUP BY ingredient', {}, function(stockResults)
@@ -202,6 +299,7 @@ end
 sendStockAlerts = function(alerts)
     local players = QBCore.Functions.GetPlayers()
     local itemNames = exports.ox_inventory:Items() or {}
+    local warehouseAlerts = {} -- Collect alerts for warehouse workers
     
     for _, playerId in ipairs(players) do
         local xPlayer = QBCore.Functions.GetPlayer(playerId)
@@ -210,8 +308,17 @@ sendStockAlerts = function(alerts)
         local playerJob = xPlayer.PlayerData.job.name
         local isBoss = xPlayer.PlayerData.job.isboss
         
-        -- Send to restaurant owners/bosses
-        if isBoss then
+        -- Check if player is a warehouse worker (Hurst job)
+        local isWarehouseWorker = false
+        for _, job in ipairs(Config.Jobs.warehouse) do
+            if playerJob == job then
+                isWarehouseWorker = true
+                break
+            end
+        end
+        
+        -- Send to restaurant owners/bosses (existing functionality)
+        if isBoss and not isWarehouseWorker then
             for _, alert in ipairs(alerts) do
                 -- Check if this item is relevant to their restaurant
                 local isRelevant = false
@@ -255,10 +362,20 @@ sendStockAlerts = function(alerts)
             end
         end
         
-        -- Send to warehouse workers (all alerts)
-        -- You can add specific job checks here for warehouse workers
+        -- Send emails to warehouse workers
+        if isWarehouseWorker and LBPhone and Config.Notifications.phone.enabled and Config.Notifications.phone.types.stock_alerts then
+            -- Collect this player for warehouse email
+            if not warehouseAlerts[playerId] then
+                warehouseAlerts[playerId] = true
+            end
+        end
         
         ::continue::
+    end
+    
+    -- Send combined email to all warehouse workers
+    for playerId, _ in pairs(warehouseAlerts) do
+        sendWarehouseStockEmail(playerId, alerts)
     end
 end
 

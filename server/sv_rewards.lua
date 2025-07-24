@@ -6,51 +6,6 @@ local showRewardNotification
 local getNextStreakBonus
 local getNextDailyBonus
 
--- Reward Configuration
-Config.DriverRewards = {
-    -- Speed Bonuses (based on delivery time)
-    speedBonuses = {
-        lightning = { maxTime = 300, multiplier = 2.5, name = "⚡ Lightning Fast", icon = "⚡" },    -- Under 5 min = 2.5x
-        express = { maxTime = 600, multiplier = 2.0, name = "🚀 Express Delivery", icon = "🚀" },   -- Under 10 min = 2x
-        fast = { maxTime = 900, multiplier = 1.5, name = "⏰ Fast Delivery", icon = "⏰" },         -- Under 15 min = 1.5x
-        standard = { maxTime = 1800, multiplier = 1.0, name = "Standard", icon = "📦" }            -- Under 30 min = 1x
-    },
-    
-    -- Volume Bonuses (based on boxes delivered)
-    volumeBonuses = {
-        mega = { minBoxes = 15, bonus = 5000, name = "🏗️ Mega Haul", icon = "🏗️" },
-        large = { minBoxes = 10, bonus = 2500, name = "📦 Large Haul", icon = "📦" },
-        medium = { minBoxes = 5, bonus = 1000, name = "📋 Medium Haul", icon = "📋" },
-        small = { minBoxes = 1, bonus = 0, name = "📦 Standard", icon = "📦" }
-    },
-    
-    -- Streak Bonuses (consecutive perfect deliveries)
-    streakBonuses = {
-        legendary = { streak = 20, multiplier = 3.0, name = "👑 Legendary Streak", icon = "👑" },
-        master = { streak = 15, multiplier = 2.5, name = "🔥 Master Streak", icon = "🔥" },
-        expert = { streak = 10, multiplier = 2.0, name = "⭐ Expert Streak", icon = "⭐" },
-        skilled = { streak = 5, multiplier = 1.5, name = "💎 Skilled Streak", icon = "💎" },
-        basic = { streak = 0, multiplier = 1.0, name = "Standard", icon = "📦" }
-    },
-    
-    -- Daily Multipliers (escalating throughout the day)
-    dailyMultipliers = {
-        { deliveries = 1, multiplier = 1.0, name = "Getting Started" },
-        { deliveries = 3, multiplier = 1.1, name = "Warming Up" },
-        { deliveries = 5, multiplier = 1.2, name = "In the Zone" },
-        { deliveries = 8, multiplier = 1.3, name = "On Fire" },
-        { deliveries = 12, multiplier = 1.5, name = "Unstoppable" },
-        { deliveries = 20, multiplier = 2.0, name = "LEGENDARY" }
-    },
-    
-    -- Perfect Delivery Criteria
-    perfectDelivery = {
-        maxTime = 1200,           -- Under 20 minutes
-        noVehicleDamage = true,   -- Van must be in good condition
-        onTimeBonus = 500         -- Bonus for perfect deliveries
-    }
-}
-
 -- BALANCED REWARD CALCULATION SYSTEM
     local function calculateDeliveryRewards(playerId, deliveryData)
     if not playerId or not deliveryData then
@@ -234,7 +189,9 @@ Config.DriverRewards = {
                 finalMultiplier = finalMultiplier,
                 currentStreak = currentStreak,
                 isPerfectDelivery = isPerfectDelivery,
-                boxes = boxes
+                boxes = boxes,
+                deliveryTime = deliveryData.deliveryTime, -- ADD THIS
+                restaurantId = deliveryData.restaurantId  -- ADD THIS
             })
             
             -- Log the delivery for analytics
@@ -284,7 +241,11 @@ Config.DriverRewards = {
 end
 
 -- Enhanced reward notification with better formatting
+-- Enhanced reward notification with email integration
 showRewardNotification = function(playerId, rewardData)
+    local xPlayer = QBCore.Functions.GetPlayer(playerId)
+    if not xPlayer then return end
+    
     local bonusText = ""
     local totalBonusAmount = 0
     
@@ -310,6 +271,7 @@ showRewardNotification = function(playerId, rewardData)
         multiplierText = "\n⚡ **TOTAL MULTIPLIER: " .. string.format("%.2f", rewardData.finalMultiplier) .. "x**"
     end
     
+    -- Send the regular notification
     TriggerClientEvent('ox_lib:notify', playerId, {
         title = '💰 DELIVERY COMPLETED!',
         description = string.format(
@@ -327,6 +289,78 @@ showRewardNotification = function(playerId, rewardData)
         position = Config.UI.notificationPosition,
         markdown = Config.UI.enableMarkdown
     })
+    
+    -- SEND DELIVERY RECEIPT EMAIL
+    local LBPhone = _G.LBPhone
+    if LBPhone and Config.Notifications.phone.enabled then
+        local phoneNumber = xPlayer.PlayerData.charinfo.phone
+        if phoneNumber then
+            -- Get delivery time from somewhere (you might need to pass this in rewardData)
+            local deliveryTime = rewardData.deliveryTime or 900 -- Default 15 minutes if not provided
+            local minutes = math.floor(deliveryTime / 60)
+            local seconds = deliveryTime % 60
+            local deliveryTimeStr = string.format("%d:%02d", minutes, seconds)
+            
+            -- Get restaurant name
+            local restaurantName = "Distribution Center"
+            if rewardData.restaurantId and Config.Restaurants[rewardData.restaurantId] then
+                restaurantName = Config.Restaurants[rewardData.restaurantId].name
+            end
+            
+            -- Get daily deliveries count
+            MySQL.Async.fetchAll([[
+                SELECT COUNT(*) as daily_deliveries 
+                FROM supply_driver_stats 
+                WHERE citizenid = ? AND delivery_date = CURDATE()
+            ]], {xPlayer.PlayerData.citizenid}, function(result)
+                local dailyDeliveries = (result and result[1]) and result[1].daily_deliveries or 1
+                
+                -- Calculate individual bonuses for receipt
+                local speedBonus = 0
+                local speedMultiplier = 1.0
+                for _, bonus in ipairs(rewardData.bonusBreakdown) do
+                    if bonus.type == "speed" then
+                        speedMultiplier = bonus.multiplier
+                        speedBonus = math.floor(rewardData.basePay * (bonus.multiplier - 1))
+                    end
+                end
+                
+                local volumeBonus = 0
+                for _, bonus in ipairs(rewardData.bonusBreakdown) do
+                    if bonus.type == "volume" then
+                        volumeBonus = bonus.amount
+                    end
+                end
+                
+                local streakBonus = 0
+                for _, bonus in ipairs(rewardData.bonusBreakdown) do
+                    if bonus.type == "streak" then
+                        streakBonus = math.floor(rewardData.basePay * (bonus.multiplier - 1))
+                    end
+                end
+                
+                local perfectBonus = rewardData.isPerfectDelivery and Config.DriverRewards.perfectDelivery.onTimeBonus or 0
+                
+                local receiptData = {
+                    restaurantName = restaurantName,
+                    boxesDelivered = rewardData.boxes,
+                    deliveryTime = deliveryTimeStr,
+                    basePay = rewardData.basePay,
+                    speedBonus = speedBonus,
+                    speedMultiplier = speedMultiplier,
+                    volumeBonus = volumeBonus,
+                    streakBonus = streakBonus,
+                    currentStreak = rewardData.currentStreak,
+                    perfectBonus = perfectBonus,
+                    totalPay = rewardData.finalPayout,
+                    dailyDeliveries = dailyDeliveries,
+                    averageRating = 95.0 -- You can calculate this from actual data
+                }
+                
+                LBPhone.SendDeliveryReceipt(phoneNumber, receiptData)
+            end)
+        end
+    end
     
     -- Achievement-style notifications for major milestones
     if rewardData.currentStreak > 0 and rewardData.currentStreak % 5 == 0 then

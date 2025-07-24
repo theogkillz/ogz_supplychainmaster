@@ -17,6 +17,16 @@ Citizen.CreateThread(function()
                     icon = "fas fa-laptop",
                     label = "Order Ingredients",
                     onSelect = function()
+                    -- Add animation for ordering
+                    local animDict = "anim@heists@prison_heiststation@cop_reactions"
+                    local animName = "cop_b_idle"
+                    RequestAnimDict(animDict)
+                    while not HasAnimDictLoaded(animDict) do
+                        Wait(10)
+                    end
+                    TaskPlayAnim(PlayerPedId(), animDict, animName, 8.0, -8.0, 1500, 0, 0, false, false, false)
+                    
+                    Wait(1500)
                         TriggerEvent("restaurant:openOrderMenu", { restaurantId = id })
                     end,
                     groups = restaurant.job

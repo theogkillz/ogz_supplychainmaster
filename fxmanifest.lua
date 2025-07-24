@@ -13,8 +13,6 @@ shared_scripts {
     'shared/config_main.lua',
     'shared/config_locations.lua',
     'shared/config_items.lua',
-    -- 'shared/config_containers.lua',
-    -- 'shared/config_manufacturing.lua',
 }
 
 client_scripts {
@@ -32,14 +30,6 @@ client_scripts {
     'client/cl_stock_alerts_menu.lua',
     'client/cl_market.lua',
     'client/cl_seller.lua',
-    
-    -- Container Systems
-    -- 'client/cl_containers.lua',
-    -- 'client/cl_containers_dynamic.lua',
-    -- 'client/cl_vehicle_containers.lua',
-    
-    -- Manufacturing System
-    -- 'client/cl_manufacturing.lua',
     
     -- Team & Delivery Systems
     'client/cl_team_deliveries.lua',
@@ -60,7 +50,6 @@ server_scripts {
     '@oxmysql/lib/MySQL.lua',
     
     -- Core Foundation
-    -- 'server/sv_database.lua',
     'server/sv_main.lua',
     
     -- Market & Pricing Systems
@@ -81,21 +70,15 @@ server_scripts {
     
     -- Reward Systems
     'server/sv_rewards.lua',
-    -- 'server/sv_rewards_containers.lua',
     
     -- Team & Emergency Systems
     'server/sv_team.lua',
     'server/sv_team_deliveries.lua',
     'server/sv_emergency_orders.lua',
     
-    -- Container & Manufacturing Systems
-    -- 'server/sv_containers.lua',
-    -- 'server/sv_restaurant_containers.lua',
-    -- 'server/sv_warehouse_containers.lua',
-    -- 'server/sv_manufacturing.lua',
-    
     -- Communication Systems
     'server/sv_notifications.lua',
+    'server/integrations/sv_lbphone_integration.lua',
     
     -- Administration
     'server/sv_admin.lua'

@@ -30,6 +30,7 @@ local currentDeliveryData = {}
 local deliveryBoxesRemaining = 0
 local totalDeliveryBoxes = 0
 local deliveryMarker = nil
+local completedDeliveryData = nil
 
 -- Enhanced box calculation with container logic
 local function calculateDeliveryBoxes(orders)
@@ -94,18 +95,8 @@ Citizen.CreateThread(function()
                     label = "Process Orders",
                     jobs = Config.Jobs.warehouse, -- Use jobs array instead of groups
                     onSelect = function()
-                        -- Add animation
-                        local animDict = "anim@heists@prison_heiststation@cop_reactions"
-                        local animName = "cop_b_idle"
-                        RequestAnimDict(animDict)
-                        while not HasAnimDictLoaded(animDict) do
-                            Wait(10)
-                        end
-                        TaskPlayAnim(PlayerPedId(), animDict, animName, 8.0, -8.0, 1500, 0, 0, false, false, false)
-                        
-                        Wait(1500) -- Wait for animation
-                        TriggerEvent("warehouse:openProcessingMenu")
-                    end
+                    TriggerEvent("warehouse:openProcessingMenu")
+                end
                 }
             }
         })
@@ -831,16 +822,16 @@ AddEventHandler("warehouse:loadMultipleBoxes", function(warehouseConfig, van, re
                             return
                         end
                         
-                        if boxesLoaded >= totalBoxes then
+                        if boxesLoaded == 0 then
+                            -- Only show instruction on first box
                             lib.notify({
-                                title = "Complete",
-                                description = "All boxes have been loaded into the van.",
+                                title = "📦 Loading Instructions",
+                                description = string.format("Take %d boxes from pallet to van", totalBoxes),
                                 type = "info",
-                                duration = 5000,
+                                duration = 10000,
                                 position = Config.UI.notificationPosition,
                                 markdown = Config.UI.enableMarkdown
                             })
-                            return
                         end
                         
                         if lib.progressBar({
@@ -865,14 +856,6 @@ AddEventHandler("warehouse:loadMultipleBoxes", function(warehouseConfig, van, re
                             end
                             TaskPlayAnim(playerPed, animDict, "idle", 8.0, -8.0, -1, 50, 0, false, false, false)
 
-                            lib.notify({
-                                title = "Box Grabbed",
-                                description = string.format("Load into van (%d/%d)", boxesLoaded + 1, totalBoxes),
-                                type = "success",
-                                duration = 5000,
-                                position = Config.UI.notificationPosition,
-                                markdown = Config.UI.enableMarkdown
-                            })
                         end
                     end
                 }
@@ -941,8 +924,8 @@ AddEventHandler("warehouse:loadMultipleBoxes", function(warehouseConfig, van, re
                                 if boxesLoaded >= totalBoxes then
                                     -- All boxes loaded!
                                     lib.notify({
-                                        title = "🎉 All Boxes Loaded!",
-                                        description = string.format("%d boxes loaded successfully. Start delivery!", totalBoxes),
+                                        title = "✅ Loading Complete",
+                                        description = string.format("All %d boxes loaded! Drive to %s", totalBoxes, restaurantName or "restaurant"),
                                         type = "success",
                                         duration = 10000,
                                         position = Config.UI.notificationPosition,
@@ -1096,20 +1079,17 @@ end)
 -- Delivery Loop Handler
 RegisterNetEvent("warehouse:startDeliveryLoop")
 AddEventHandler("warehouse:startDeliveryLoop", function(restaurantId, van, orders, deliverBoxPosition)
-    if deliveryBoxesRemaining <= 0 then
-        -- All boxes delivered, complete delivery
-        TriggerEvent("warehouse:completeDelivery", restaurantId, van, orders)
-        return
+    if deliveryBoxesRemaining == totalDeliveryBoxes then
+    -- Only show instruction on first box
+        lib.notify({
+            title = "📦 Delivery Instructions", 
+            description = string.format("Take %d boxes from van to business door", totalDeliveryBoxes),
+            type = "info",
+            duration = 10000,
+            position = Config.UI.notificationPosition,
+            markdown = Config.UI.enableMarkdown
+        })
     end
-    
-    lib.notify({
-        title = "Delivery Progress",
-        description = string.format("%d of %d boxes remaining", deliveryBoxesRemaining, totalDeliveryBoxes),
-        type = "info",
-        duration = 8000,
-        position = Config.UI.notificationPosition,
-        markdown = Config.UI.enableMarkdown
-    })
     
     -- Start with grabbing box from van
     TriggerEvent("warehouse:grabBoxFromVan", restaurantId, van, orders, deliverBoxPosition)
@@ -1155,15 +1135,6 @@ AddEventHandler("warehouse:grabBoxFromVan", function(restaurantId, van, orders, 
             itemLabel = itemNames[itemKey:lower()] and itemNames[itemKey:lower()].label or itemKey
         end
     end
-
-    lib.notify({
-        title = "Grab Box from Van",
-        description = string.format("Get box %d/%d from van rear", totalDeliveryBoxes - deliveryBoxesRemaining + 1, totalDeliveryBoxes),
-        type = "success",
-        duration = 10000,
-        position = Config.UI.notificationPosition,
-        markdown = Config.UI.enableMarkdown
-    })
 
     local function updateGrabBoxZone()
         while DoesEntityExist(van) and not hasBox do
@@ -1219,15 +1190,6 @@ AddEventHandler("warehouse:grabBoxFromVan", function(restaurantId, van, orders, 
                                     Citizen.Wait(0)
                                 end
                                 TaskPlayAnim(playerPed, animDict, "idle", 8.0, -8.0, -1, 50, 0, false, false, false)
-
-                                lib.notify({
-                                    title = "Box Grabbed",
-                                    description = "Take box to the businesses door.",
-                                    type = "success",
-                                    duration = 10000,
-                                    position = Config.UI.notificationPosition,
-                                    markdown = Config.UI.enableMarkdown
-                                })
 
                                 exports.ox_target:removeZone(vanTargetName)
                                 TriggerEvent("warehouse:deliverBoxWithMarker", restaurantId, van, orders, boxProp, deliverBoxPosition)
@@ -1327,19 +1289,18 @@ AddEventHandler("warehouse:deliverBoxWithMarker", function(restaurantId, van, or
                         deliveryBoxesRemaining = deliveryBoxesRemaining - 1
                         
                         if deliveryBoxesRemaining > 0 then
+                            -- Don't show individual notifications, just continue
+                            TriggerEvent("warehouse:startDeliveryLoop", restaurantId, van, orders, deliverBoxPosition)
+                        else
+                            -- All boxes delivered - single completion notification
                             lib.notify({
-                                title = "Box Delivered",
-                                description = string.format("%d boxes remaining. Get next box from van.", deliveryBoxesRemaining),
+                                title = "✅ Delivery Complete", 
+                                description = "All boxes delivered! Return van to warehouse.",
                                 type = "success",
-                                duration = 8000,
+                                duration = 10000,
                                 position = Config.UI.notificationPosition,
                                 markdown = Config.UI.enableMarkdown
                             })
-                            
-                            -- Continue delivery loop
-                            TriggerEvent("warehouse:startDeliveryLoop", restaurantId, van, orders, deliverBoxPosition)
-                        else
-                            -- All boxes delivered - trigger stock update immediately
                             TriggerEvent("warehouse:completeDelivery", restaurantId, van, orders)
                         end
                     end
@@ -1383,6 +1344,12 @@ AddEventHandler("warehouse:completeDelivery", function(restaurantId, van, orders
     })
     
     TriggerEvent("warehouse:returnTruck", van, restaurantId, orders)
+end)
+
+RegisterNetEvent('delivery:storeCompletionData')
+AddEventHandler('delivery:storeCompletionData', function(data)
+    completedDeliveryData = data
+    completedDeliveryData.deliveryTime = math.floor((GetGameTimer() - deliveryStartTime) / 1000)
 end)
 
 -- Return Van (Clean Van Return Only - Stock Already Updated)
@@ -1441,10 +1408,23 @@ AddEventHandler("warehouse:returnTruck", function(van, restaurantId, orders)
                         RemoveBlip(blip)
                         DeleteVehicle(van)
                         
+                        if completedDeliveryData then
+                    TriggerServerEvent('delivery:requestPayment', completedDeliveryData)
+                        completedDeliveryData = nil -- Clear the data
+                    end
+                    
+                    lib.alertDialog({
+                        header = "Van Returned",
+                        content = "Processing your payment...",
+                        centered = true,
+                        cancel = false
+                    })
+                    
                         -- Reset delivery variables for next job
                         deliveryBoxesRemaining = 0
                         totalDeliveryBoxes = 0
                         currentDeliveryData = {}
+                        deliveryStartTime = 0
                         
                         break
                     end
@@ -1462,4 +1442,65 @@ AddEventHandler("warehouse:returnTruck", function(van, restaurantId, orders)
         end
         RemoveBlip(blip)
     end)
+end)
+
+-- Handle email action button click
+RegisterNetEvent('supply:openWarehouseMenu')
+AddEventHandler('supply:openWarehouseMenu', function(data)
+    -- Get the nearest warehouse location
+    local playerCoords = GetEntityCoords(PlayerPedId())
+    local nearestWarehouse = nil
+    local nearestDistance = 9999.0
+    
+    -- Find the closest warehouse
+    for index, warehouse in ipairs(Config.WarehousesLocation) do
+        local distance = #(playerCoords - warehouse.position)
+        if distance < nearestDistance then
+            nearestDistance = distance
+            nearestWarehouse = warehouse
+        end
+    end
+    
+    if nearestWarehouse then
+        -- Set waypoint to nearest warehouse
+        SetNewWaypoint(nearestWarehouse.position.x, nearestWarehouse.position.y)
+        
+        -- Show notification
+        lib.notify({
+            title = "📍 Warehouse Location",
+            description = "Waypoint set to nearest warehouse. Head there to view orders!",
+            type = "info",
+            duration = 8000,
+            position = Config.UI.notificationPosition,
+            markdown = Config.UI.enableMarkdown
+        })
+        
+        -- Optional: Create a temporary blip
+        local warehouseBlip = AddBlipForCoord(nearestWarehouse.position.x, nearestWarehouse.position.y, nearestWarehouse.position.z)
+        SetBlipSprite(warehouseBlip, 478) -- Warehouse icon
+        SetBlipDisplay(warehouseBlip, 4)
+        SetBlipScale(warehouseBlip, 1.2)
+        SetBlipColour(warehouseBlip, 5) -- Yellow
+        SetBlipAsShortRange(warehouseBlip, false)
+        SetBlipFlashes(warehouseBlip, true) -- Make it flash
+        BeginTextCommandSetBlipName("STRING")
+        AddTextComponentString("📦 New Order Available")
+        EndTextCommandSetBlipName(warehouseBlip)
+        
+        -- Remove the flashing blip after 30 seconds
+        Citizen.SetTimeout(30000, function()
+            if DoesBlipExist(warehouseBlip) then
+                RemoveBlip(warehouseBlip)
+            end
+        end)
+    else
+        lib.notify({
+            title = "Error",
+            description = "No warehouse location found!",
+            type = "error",
+            duration = 5000,
+            position = Config.UI.notificationPosition,
+            markdown = Config.UI.enableMarkdown
+        })
+    end
 end)
