@@ -1,8 +1,21 @@
 local QBCore = exports['qb-core']:GetCoreObject()
 
+-- Handler for server response with achievement data
+RegisterNetEvent("achievements:receiveProgress")
+AddEventHandler("achievements:receiveProgress", function(data)
+    -- This event receives data from server and triggers the display
+    TriggerEvent("achievements:showProgress", data)
+end)
+
 -- Achievement Progress Display
 RegisterNetEvent("achievements:showProgress")
 AddEventHandler("achievements:showProgress", function(data)
+    -- Fix: Check if data is nil and provide defaults
+    if not data then
+        print("[ACHIEVEMENTS] Warning: showProgress called with nil data")
+        data = {}
+    end
+    
     local currentTier = data.currentTier or "rookie"
     local vehicleTier = data.vehicleTier or "rookie"
     local stats = data.stats or {}
@@ -19,7 +32,7 @@ AddEventHandler("achievements:showProgress", function(data)
     }
     
     -- Current Tier Display
-    local tierInfo = Config.AchievementVehicles.performanceTiers[currentTier]
+    local tierInfo = Config.AchievementVehicles and Config.AchievementVehicles.performanceTiers and Config.AchievementVehicles.performanceTiers[currentTier]
     if tierInfo then
         table.insert(options, {
             title = "🏆 Current Achievement Tier",
@@ -63,7 +76,7 @@ AddEventHandler("achievements:showProgress", function(data)
     end
     
     if nextTierName then
-        local nextTier = Config.AchievementVehicles.performanceTiers[nextTierName]
+        local nextTier = Config.AchievementVehicles and Config.AchievementVehicles.performanceTiers and Config.AchievementVehicles.performanceTiers[nextTierName]
         if nextTier then
             -- Calculate progress (simplified)
             local progressPercent = 0
@@ -130,4 +143,47 @@ AddEventHandler("achievements:showProgress", function(data)
         options = options
     })
     lib.showContext("achievement_progress_menu")
+end)
+
+-- Proper achievement menu handler that fetches data first
+RegisterNetEvent("warehouse:openAchievementMenu")
+AddEventHandler("warehouse:openAchievementMenu", function()
+    -- Request achievement data from server
+    QBCore.Functions.TriggerCallback('warehouse:getAchievementProgress', function(achievementData)
+        if achievementData then
+            -- Trigger the display event with the fetched data
+            TriggerEvent("achievements:showProgress", achievementData)
+        else
+            -- Fallback with default data if server doesn't respond
+            local defaultData = {
+                currentTier = "rookie",
+                vehicleTier = "rookie",
+                stats = {
+                    totalDeliveries = 0,
+                    perfectDeliveries = 0,
+                    averageRating = 0,
+                    totalEarnings = 0
+                },
+                progress = {
+                    lightningDeliveries = 0,
+                    largeDeliveries = 0,
+                    perfectDays = 0
+                }
+            }
+            TriggerEvent("achievements:showProgress", defaultData)
+        end
+    end)
+end)
+
+-- Alternative: Direct server event approach
+RegisterNetEvent("warehouse:requestAchievementProgress")
+AddEventHandler("warehouse:requestAchievementProgress", function()
+    -- Request data from server
+    TriggerServerEvent("warehouse:getAchievementProgress")
+end)
+
+-- Server will respond with this event
+RegisterNetEvent("warehouse:receiveAchievementProgress")
+AddEventHandler("warehouse:receiveAchievementProgress", function(achievementData)
+    TriggerEvent("achievements:showProgress", achievementData)
 end)

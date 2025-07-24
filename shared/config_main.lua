@@ -92,7 +92,7 @@ Config.DriverPayPrec = 0.22 -- Driver payment percentage
 -- DELIVERY PROPS CONFIGURATION
 -- ===================================
 Config.DeliveryProps = {
-    boxProp = "ng_proc_box_01a",              -- Individual box prop
+    boxProp = "v_serv_abox_04",              -- Individual box prop
     palletProp = "prop_boxpile_06b",          -- Stacked box pallet prop
     palletOffset = vector3(0, 0, 0),          -- Pallet positioning offset
     deliveryMarker = {

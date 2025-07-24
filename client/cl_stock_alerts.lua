@@ -1,269 +1,8 @@
--- EPIC STOCK ALERT & PREDICTION SYSTEM
-
 local QBCore = exports['qb-core']:GetCoreObject()
-local restockSuggestions = {}
--- Active alerts tracking
-local activeAlerts = {}
-local lastAlertTime = {}
-local stockPredictions = {}
-local calculateTrend
-local sendStockAlerts  
-local getAlertIcon
-local getAlertColor
+local lib = exports['ox_lib']
 
--- Convert all config values to numbers once to prevent string comparison errors
-local THRESHOLDS = {
-    critical = tonumber(Config.StockAlerts.thresholds.critical),
-    low = tonumber(Config.StockAlerts.thresholds.low),
-    moderate = tonumber(Config.StockAlerts.thresholds.moderate),
-    healthy = tonumber(Config.StockAlerts.thresholds.healthy)
-}
-
-local MAX_STOCK_DEFAULT = tonumber(Config.StockAlerts.maxStock.default)
-local ALERT_COOLDOWN = tonumber(Config.StockAlerts.notifications.alertCooldown)
-local MAX_ALERTS_PER_CHECK = tonumber(Config.StockAlerts.notifications.maxAlertsPerCheck)
-
--- Calculate stock level percentage
-local function getStockPercentage(currentStock, itemName)
-    local maxStock = MAX_STOCK_DEFAULT
-    
-    -- Check if item has custom max stock
-    if Config.StockAlerts.maxStock[itemName] then
-        maxStock = tonumber(Config.StockAlerts.maxStock[itemName])
-    end
-    
-    return math.min(100, (currentStock / maxStock) * 100)
-end
-
--- Get alert level based on stock percentage
-local function getAlertLevel(percentage)
-    if percentage <= THRESHOLDS.critical then
-        return "critical"
-    elseif percentage <= THRESHOLDS.low then
-        return "low"
-    elseif percentage <= THRESHOLDS.moderate then
-        return "moderate"
-    else
-        return "healthy"
-    end
-end
-
--- Analyze usage patterns for demand prediction
-local function analyzeUsagePatterns(itemName)
-    local analysisWindow = Config.StockAlerts.prediction.analysisWindow
-    local startDate = os.date("%Y-%m-%d", os.time() - (analysisWindow * 24 * 3600))
-    
-    MySQL.Async.fetchAll([[
-        SELECT 
-            DATE(created_at) as order_date,
-            SUM(quantity) as daily_usage,
-            COUNT(*) as order_count
-        FROM supply_orders 
-        WHERE ingredient = ? 
-        AND created_at >= ? 
-        AND status = 'completed'
-        GROUP BY DATE(created_at)
-        ORDER BY order_date DESC
-    ]], {itemName, startDate}, function(results)
-        
-        if not results or #results < Config.StockAlerts.prediction.minDataPoints then
-            return
-        end
-        
-        -- Calculate usage statistics
-        local totalUsage = 0
-        local usageByDay = {}
-        local ordersByDay = {}
-        
-        for _, row in ipairs(results) do
-            totalUsage = totalUsage + row.daily_usage
-            table.insert(usageByDay, row.daily_usage)
-            table.insert(ordersByDay, row.order_count)
-        end
-        
-        local avgDailyUsage = totalUsage / #results
-        local avgOrdersPerDay = (#ordersByDay > 0) and (table.concat(ordersByDay, "+") / #ordersByDay) or 0
-        
-        -- Calculate variance for confidence
-        local variance = 0
-        for _, usage in ipairs(usageByDay) do
-            variance = variance + (usage - avgDailyUsage) ^ 2
-        end
-        variance = variance / #usageByDay
-        local standardDeviation = math.sqrt(variance)
-        
-        -- Calculate confidence (lower variance = higher confidence)
-        local confidence = math.max(0.1, 1 - (standardDeviation / avgDailyUsage))
-        
-        -- Predict future usage
-        local forecastDays = Config.StockAlerts.prediction.forecastDays
-        local predictedUsage = avgDailyUsage * forecastDays
-        
-        -- Store prediction
-        stockPredictions[itemName] = {
-            avgDailyUsage = avgDailyUsage,
-            predictedUsage = predictedUsage,
-            confidence = confidence,
-            trend = calculateTrend(usageByDay),
-            lastUpdated = os.time()
-        }
-    end)
-end
-
--- Calculate trend (increasing, decreasing, stable)
-calculateTrend = function(usageData)
-    if #usageData < 3 then return "stable" end
-    
-    local recent = {}
-    local older = {}
-    local half = math.floor(#usageData / 2)
-    
-    for i = 1, half do
-        table.insert(older, usageData[i])
-    end
-    
-    for i = half + 1, #usageData do
-        table.insert(recent, usageData[i])
-    end
-    
-    local recentAvg = 0
-    local olderAvg = 0
-    
-    for _, val in ipairs(recent) do recentAvg = recentAvg + val end
-    for _, val in ipairs(older) do olderAvg = olderAvg + val end
-    
-    recentAvg = recentAvg / #recent
-    olderAvg = olderAvg / #older
-    
-    local change = (recentAvg - olderAvg) / olderAvg
-    
-    if change > 0.15 then
-        return "increasing"
-    elseif change < -0.15 then
-        return "decreasing"
-    else
-        return "stable"
-    end
-end
-
--- Generate stock alerts
-local function checkStockLevels()
-    MySQL.Async.fetchAll('SELECT ingredient, SUM(quantity) as total_stock FROM supply_warehouse_stock GROUP BY ingredient', {}, function(stockResults)
-        if not stockResults then return end
-        
-        local alerts = {}
-        local currentTime = os.time()
-        
-        for _, stock in ipairs(stockResults) do
-            local itemName = stock.ingredient
-            local currentStock = stock.total_stock
-            local percentage = getStockPercentage(currentStock, itemName)
-            local alertLevel = getAlertLevel(percentage)
-            
-            -- Only alert for non-healthy stock levels
-            if alertLevel ~= "healthy" then
-                local alertKey = itemName .. "_" .. alertLevel
-                local lastAlert = lastAlertTime[alertKey] or 0
-                
-                -- Check cooldown
-                if currentTime - lastAlert > ALERT_COOLDOWN then
-                    -- Get prediction data
-                    local prediction = stockPredictions[itemName]
-                    local daysUntilStockout = prediction and (currentStock / prediction.avgDailyUsage) or nil
-                    
-                    table.insert(alerts, {
-                        itemName = itemName,
-                        currentStock = currentStock,
-                        percentage = percentage,
-                        alertLevel = alertLevel,
-                        prediction = prediction,
-                        daysUntilStockout = daysUntilStockout,
-                        timestamp = currentTime
-                    })
-                    
-                    lastAlertTime[alertKey] = currentTime
-                    
-                    -- Limit alerts per check
-                    if #alerts >= MAX_ALERTS_PER_CHECK then
-                        break
-                    end
-                end
-            end
-        end
-        
-        -- Send alerts to relevant players
-        if #alerts > 0 then
-            sendStockAlerts(alerts)
-        end
-    end)
-end
-
--- Send alerts to restaurant owners and warehouse workers
-sendStockAlerts = function(alerts)
-    local players = QBCore.Functions.GetPlayers()
-    local itemNames = exports.ox_inventory:Items() or {}
-    
-    for _, playerId in ipairs(players) do
-        local xPlayer = QBCore.Functions.GetPlayer(playerId)
-        if not xPlayer then goto continue end
-        
-        local playerJob = xPlayer.PlayerData.job.name
-        local isBoss = xPlayer.PlayerData.job.isboss
-        
-        -- Send to restaurant owners/bosses
-        if isBoss then
-            for _, alert in ipairs(alerts) do
-                -- Check if this item is relevant to their restaurant
-                local isRelevant = false
-                for restaurantId, restaurant in pairs(Config.Restaurants) do
-                    if restaurant.job == playerJob then
-                        -- Check if item is in their menu
-                        local restaurantItems = Config.Items[playerJob] or {}
-                        for category, categoryItems in pairs(restaurantItems) do
-                            if categoryItems[alert.itemName] then
-                                isRelevant = true
-                                break
-                            end
-                        end
-                        break
-                    end
-                end
-                
-                if isRelevant then
-                    local itemLabel = itemNames[alert.itemName] and itemNames[alert.itemName].label or alert.itemName
-                    local alertIcon = getAlertIcon(alert.alertLevel)
-                    local alertColor = getAlertColor(alert.alertLevel)
-                    
-                    local description = string.format(
-                        "📦 **%s**: %d units (%.1f%%)\n%s%s",
-                        itemLabel,
-                        alert.currentStock,
-                        alert.percentage,
-                        alert.daysUntilStockout and string.format("⏰ **%.1f days** until stockout\n", alert.daysUntilStockout) or "",
-                        alert.prediction and string.format("📈 Trend: **%s** (%.0f%% confidence)", alert.prediction.trend, alert.prediction.confidence * 100) or ""
-                    )
-                    
-                    TriggerClientEvent('ox_lib:notify', playerId, {
-                        title = alertIcon .. ' Stock Alert',
-                        description = description,
-                        type = alertColor,
-                        duration = 12000,
-                        position = Config.UI.notificationPosition,
-                        markdown = Config.UI.enableMarkdown
-                    })
-                end
-            end
-        end
-        
-        -- Send to warehouse workers (all alerts)
-        -- You can add specific job checks here for warehouse workers
-        
-        ::continue::
-    end
-end
-
--- Get alert visual indicators
-getAlertIcon = function(alertLevel)
+-- Helper functions for icons
+local function getAlertIcon(alertLevel)
     local icons = {
         critical = "🚨",
         low = "⚠️", 
@@ -273,293 +12,291 @@ getAlertIcon = function(alertLevel)
     return icons[alertLevel] or "📦"
 end
 
-getAlertColor = function(alertLevel)
-    local colors = {
-        critical = "error",
-        low = "warning",
-        moderate = "info", 
-        healthy = "success"
+local function getTrendIcon(trend)
+    local icons = {
+        increasing = "📈",
+        decreasing = "📉",
+        stable = "➡️",
+        unknown = "❓"
     }
-    return colors[alertLevel] or "info"
+    return icons[trend] or "➡️"
 end
 
--- Auto-generate restock suggestions
-local function generateRestockSuggestions()
-    local moderateThreshold = tonumber(Config.StockAlerts.thresholds.moderate)
-    local criticalThreshold = tonumber(Config.StockAlerts.thresholds.critical)
-    MySQL.Async.fetchAll([[
-        SELECT 
-            ws.ingredient,
-            ws.quantity as current_stock,
-            COALESCE(recent_orders.avg_daily_usage, 0) as avg_daily_usage,
-            COALESCE(recent_orders.total_recent_orders, 0) as recent_demand
-        FROM supply_warehouse_stock ws
-        LEFT JOIN (
-            SELECT 
-                ingredient,
-                AVG(daily_usage) as avg_daily_usage,
-                SUM(daily_usage) as total_recent_orders
-            FROM (
-                SELECT 
-                    ingredient,
-                    DATE(created_at) as order_date,
-                    SUM(quantity) as daily_usage
-                FROM supply_orders 
-                WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-                AND status = 'completed'
-                GROUP BY ingredient, DATE(created_at)
-            ) daily_stats
-            GROUP BY ingredient
-        ) recent_orders ON ws.ingredient = recent_orders.ingredient
-    ]], {}, function(results)
+-- -- Stock Alerts Dashboard
+-- RegisterNetEvent("stockalerts:openDashboard")
+-- AddEventHandler("stockalerts:openDashboard", function()
+--     local options = {
+--         {
+--             title = "📊 Stock Overview",
+--             description = "View all inventory levels with alerts",
+--             icon = "fas fa-chart-bar",
+--             onSelect = function()
+--                 TriggerServerEvent("stockalerts:getOverview")
+--             end
+--         },
+--         {
+--             title = "🔮 Predictive Analytics",
+--             description = "View demand forecasts and trends",
+--             icon = "fas fa-crystal-ball",
+--             onSelect = function()
+--                 TriggerEvent("stockalerts:showPredictions")
+--             end
+--         },
+--         {
+--             title = "⚠️ Critical Alerts",
+--             description = "View only urgent stock alerts",
+--             icon = "fas fa-exclamation-triangle",
+--             onSelect = function()
+--                 TriggerServerEvent("stockalerts:getCriticalAlerts")
+--             end
+--         },
+--         {
+--             title = "📈 Usage Trends",
+--             description = "Analyze consumption patterns",
+--             icon = "fas fa-trending-up",
+--             onSelect = function()
+--                 TriggerServerEvent("stockalerts:getUsageTrends")
+--             end
+--         },
+--         {
+--             title = "← Back to Warehouse",
+--             icon = "fas fa-arrow-left",
+--             onSelect = function()
+--                 TriggerEvent("warehouse:openProcessingMenu")
+--             end
+--         }
+--     }
+    
+--     lib.registerContext({
+--         id = "stock_dashboard",
+--         title = "🚨 Stock Alerts Dashboard",
+--         options = options
+--     })
+--     lib.showContext("stock_dashboard")
+-- end)
+
+-- -- Display Stock Overview
+-- RegisterNetEvent("stockalerts:showOverview")
+-- AddEventHandler("stockalerts:showOverview", function(stockData)
+--     local options = {
+--         {
+--             title = "← Back to Dashboard",
+--             icon = "fas fa-arrow-left",
+--             onSelect = function()
+--                 TriggerEvent("stockalerts:openDashboard")
+--             end
+--         }
+--     }
+    
+--     if not stockData or #stockData == 0 then
+--         table.insert(options, {
+--             title = "No Stock Data",
+--             description = "No inventory information available",
+--             disabled = true
+--         })
+--     else
+--         -- Sort by alert level priority
+--         table.sort(stockData, function(a, b)
+--             local priorities = { critical = 4, low = 3, moderate = 2, healthy = 1 }
+--             return (priorities[a.alertLevel] or 0) > (priorities[b.alertLevel] or 0)
+--         end)
         
-        if not results then return end
-        
-        local suggestions = {}
-        
-        for _, item in ipairs(results) do
-            local currentStock = tonumber(item.current_stock) or 0
-            local dailyUsage = tonumber(item.avg_daily_usage) or 0
-            local percentage = getStockPercentage(currentStock, item.ingredient)
+--         for _, item in ipairs(stockData) do
+--             local alertIcon = getAlertIcon(item.alertLevel)
+--             local trendIcon = getTrendIcon(item.trend)
             
-            if percentage <= moderateThreshold and dailyUsage > 0 then
-                local daysOfStock = currentStock / dailyUsage
-                local targetDays = 14 -- Target 2 weeks of stock
-                local suggestedOrder = math.max(0, math.ceil((targetDays - daysOfStock) * dailyUsage))
-                
-                if suggestedOrder > 0 then
-                    table.insert(suggestions, {
-                        ingredient = item.ingredient,
-                        currentStock = currentStock,
-                        daysOfStock = daysOfStock,
-                        suggestedOrder = suggestedOrder,
-                        dailyUsage = dailyUsage,
-                        priority = percentage <= criticalThreshold and "high" or "normal"
-                    })
-                end
-            end
-        end
-        
-        -- Sort by priority and days of stock remaining
-        table.sort(suggestions, function(a, b)
-            if a.priority ~= b.priority then
-                return a.priority == "high"
-            end
-            return a.daysOfStock < b.daysOfStock
-        end)
-        
-        -- Store suggestions for retrieval
-        restockSuggestions = suggestions
-    end)
-end
-
--- Event handlers for stock alerts system
-RegisterNetEvent("stockalerts:getAlerts")
-AddEventHandler("stockalerts:getAlerts", function()
-        -- Query database for alerts and send to client
-        TriggerClientEvent("stockalerts:showAlerts", source, alerts)
-    end)
-    -- Get stock overview for dashboard
-RegisterNetEvent('stockalerts:getOverview')
-AddEventHandler('stockalerts:getOverview', function()
-    local src = source
+--             local description = string.format(
+--                 "%s **%d units** (%.1f%%)\n📈 %s %s • 📊 %.0f%% confidence",
+--                 alertIcon,
+--                 item.currentStock,
+--                 item.percentage,
+--                 trendIcon,
+--                 item.trend:gsub("^%l", string.upper),
+--                 item.confidence * 100
+--             )
+            
+--             if item.daysRemaining then
+--                 description = description .. string.format("\n⏰ **%.1f days** remaining", item.daysRemaining)
+--             end
+            
+--             if item.dailyUsage > 0 then
+--                 description = description .. string.format("\n📦 **%.1f** avg daily usage", item.dailyUsage)
+--             end
+            
+--             table.insert(options, {
+--                 title = item.label,
+--                 description = description,
+--                 metadata = {
+--                     ["Stock Level"] = item.currentStock .. " units",
+--                     ["Percentage"] = string.format("%.1f%%", item.percentage),
+--                     ["Alert Level"] = item.alertLevel:gsub("^%l", string.upper),
+--                     ["Daily Usage"] = string.format("%.1f", item.dailyUsage),
+--                     ["Days Remaining"] = item.daysRemaining and string.format("%.1f", item.daysRemaining) or "N/A",
+--                     ["Trend"] = item.trend:gsub("^%l", string.upper)
+--                 }
+--             })
+--         end
+--     end
     
-    MySQL.Async.fetchAll([[
-        SELECT 
-            ws.ingredient,
-            ws.quantity as current_stock,
-            COALESCE(usage_stats.avg_daily_usage, 0) as avg_daily_usage,
-            COALESCE(usage_stats.trend, 'stable') as trend
-        FROM supply_warehouse_stock ws
-        LEFT JOIN (
-            SELECT 
-                ingredient,
-                AVG(daily_usage) as avg_daily_usage,
-                'stable' as trend
-            FROM (
-                SELECT 
-                    ingredient,
-                    DATE(created_at) as order_date,
-                    SUM(quantity) as daily_usage
-                FROM supply_orders 
-                WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-                AND status = 'completed'
-                GROUP BY ingredient, DATE(created_at)
-            ) daily_stats
-            GROUP BY ingredient
-        ) usage_stats ON ws.ingredient = usage_stats.ingredient
-        ORDER BY ws.quantity ASC
-    ]], {}, function(results)
+--     lib.registerContext({
+--         id = "stock_overview",
+--         title = "📊 Stock Overview",
+--         options = options
+--     })
+--     lib.showContext("stock_overview")
+-- end)
+
+-- -- Display Restock Suggestions
+-- RegisterNetEvent("stockalerts:showSuggestions")
+-- AddEventHandler("stockalerts:showSuggestions", function(suggestions)
+--     local options = {
+--         {
+--             title = "← Back to Warehouse",
+--             icon = "fas fa-arrow-left",
+--             onSelect = function()
+--                 TriggerEvent("warehouse:openProcessingMenu")
+--             end
+--         }
+--     }
+    
+--     if not suggestions or #suggestions == 0 then
+--         table.insert(options, {
+--             title = "✅ All Stock Levels Good",
+--             description = "No restock recommendations at this time",
+--             disabled = true
+--         })
+--     else
+--         table.insert(options, {
+--             title = "🤖 AI Recommendations",
+--             description = string.format("Based on %d days of usage analysis", Config.StockAlerts and Config.StockAlerts.prediction.analysisWindow or 7),
+--             disabled = true
+--         })
         
-        local stockOverview = {}
-        local itemNames = exports.ox_inventory:Items() or {}
-        
-        for _, item in ipairs(results) do
-        -- Convert database strings to numbers
-        local currentStock = tonumber(item.current_stock) or 0
-        local avgDailyUsage = tonumber(item.avg_daily_usage) or 0
-        
-        local percentage = getStockPercentage(currentStock, item.ingredient)
-        local alertLevel = getAlertLevel(percentage)
-        local prediction = stockPredictions[item.ingredient]
-        
-        table.insert(stockOverview, {
-            ingredient = item.ingredient,
-            label = itemNames[item.ingredient] and itemNames[item.ingredient].label or item.ingredient,
-            currentStock = currentStock,
-            percentage = percentage,
-            alertLevel = alertLevel,
-            dailyUsage = avgDailyUsage,
-            daysRemaining = avgDailyUsage > 0 and (currentStock / avgDailyUsage) or nil,
-            trend = prediction and prediction.trend or "unknown",
-            confidence = prediction and prediction.confidence or 0
-        })
+--         for _, suggestion in ipairs(suggestions) do
+--             local priorityIcon = suggestion.priority == "high" and "🚨" or "📦"
+--             local itemNames = exports.ox_inventory:Items() or {}
+--             local itemLabel = itemNames[suggestion.ingredient] and itemNames[suggestion.ingredient].label or suggestion.ingredient
+            
+--             local description = string.format(
+--                 "%s **Order %d units**\n📦 Current: %d units (%.1f days left)\n📈 Daily usage: %.1f units",
+--                 priorityIcon,
+--                 suggestion.suggestedOrder,
+--                 suggestion.currentStock,
+--                 suggestion.daysOfStock,
+--                 suggestion.dailyUsage
+--             )
+            
+--             table.insert(options, {
+--                 title = itemLabel,
+--                 description = description,
+--                 metadata = {
+--                     ["Current Stock"] = suggestion.currentStock .. " units",
+--                     ["Suggested Order"] = suggestion.suggestedOrder .. " units", 
+--                     ["Days Remaining"] = string.format("%.1f days", suggestion.daysOfStock),
+--                     ["Daily Usage"] = string.format("%.1f units", suggestion.dailyUsage),
+--                     ["Priority"] = suggestion.priority:gsub("^%l", string.upper)
+--                 },
+--                 onSelect = function()
+--                     -- Could add auto-order functionality here
+--                     lib.notify({
+--                         title = "Restock Suggestion",
+--                         description = string.format("Consider ordering **%d %s** to maintain optimal stock levels", suggestion.suggestedOrder, itemLabel),
+--                         type = "info",
+--                         duration = 10000,
+--                         position = Config.UI.notificationPosition,
+--                         markdown = Config.UI.enableMarkdown
+--                     })
+--                 end
+--             })
+--         end
+--     end
+    
+--     lib.registerContext({
+--         id = "restock_suggestions",
+--         title = "📦 AI Restock Suggestions",
+--         options = options
+--     })
+--     lib.showContext("restock_suggestions")
+-- end)
+
+-- Real-time stock alert notifications (these come automatically from server)
+RegisterNetEvent("stockalerts:urgentAlert")
+AddEventHandler("stockalerts:urgentAlert", function(alertData)
+    -- Play sound for critical alerts
+    if alertData.alertLevel == "critical" then
+        PlaySoundFrontend(-1, "CHECKPOINT_PERFECT", "HUD_MINI_GAME_SOUNDSET", true)
     end
-        
-        TriggerClientEvent('stockalerts:showOverview', src, stockOverview)
-    end)
-end)
-        
-
--- Get restock suggestions
-RegisterNetEvent('stockalerts:getSuggestions')
-AddEventHandler('stockalerts:getSuggestions', function()
-    local src = source
-    generateRestockSuggestions()
     
-    Citizen.Wait(1000) -- Wait for suggestions to generate
-    
-    TriggerClientEvent('stockalerts:showSuggestions', src, restockSuggestions or {})
+    lib.alertDialog({
+        header = "🚨 URGENT STOCK ALERT",
+        content = string.format(
+            "**%s** is critically low!\n\nCurrent Stock: %d units\nEstimated Days Remaining: %.1f\n\nImmediate action required!",
+            alertData.itemLabel,
+            alertData.currentStock,
+            alertData.daysUntilStockout or 0
+        ),
+        centered = true,
+        cancel = false,
+        size = 'md'
+    })
 end)
 
--- Initialize stock alerts system
-RegisterNetEvent('stockalerts:initialize')
-AddEventHandler('stockalerts:initialize', function()
-    print("[STOCK ALERTS] Initializing stock alert system...")
-    
-    -- Initial analysis of all items
-    MySQL.Async.fetchAll('SELECT DISTINCT ingredient FROM supply_warehouse_stock', {}, function(results)
-        if results then
-            for _, item in ipairs(results) do
-                analyzeUsagePatterns(item.ingredient)
-                Citizen.Wait(100) -- Prevent overwhelming the database
-            end
-        end
-    end)
-    
-    -- Start periodic checks
-    Citizen.CreateThread(function()
-        while true do
-            checkStockLevels()
-            generateRestockSuggestions()
-            Citizen.Wait(Config.StockAlerts.notifications.checkInterval * 1000)
-        end
-    end)
-    
-    -- Update predictions periodically
-    Citizen.CreateThread(function()
-        while true do
-            Citizen.Wait(3600000) -- Every hour
-            MySQL.Async.fetchAll('SELECT DISTINCT ingredient FROM supply_warehouse_stock', {}, function(results)
-                if results then
-                    for _, item in ipairs(results) do
-                        analyzeUsagePatterns(item.ingredient)
-                        Citizen.Wait(1000)
-                    end
-                end
-            end)
-        end
-    end)
-    
-    print("[STOCK ALERTS] Stock alert system initialized successfully!")
-end)
+-- -- Predictive analytics display
+-- RegisterNetEvent("stockalerts:showPredictions")
+-- AddEventHandler("stockalerts:showPredictions", function()
+--     -- This would show advanced prediction charts and analytics
+--     lib.notify({
+--         title = "🔮 Predictive Analytics",
+--         description = "Advanced forecasting dashboard coming soon! Currently analyzing usage patterns in real-time.",
+--         type = "info",
+--         duration = 8000,
+--         position = Config.UI.notificationPosition,
+--         markdown = Config.UI.enableMarkdown
+--     })
+-- end)
 
--- Start the system when resource starts
-AddEventHandler('onResourceStart', function(resourceName)
-    if resourceName == GetCurrentResourceName() then
-        Citizen.Wait(5000) -- Wait for other systems to load
-        TriggerEvent('stockalerts:initialize')
-    end
-end)
-
--- Get Critical Alerts Only
-RegisterNetEvent('stockalerts:getCriticalAlerts')
-AddEventHandler('stockalerts:getCriticalAlerts', function()
-    local src = source
+-- RegisterNetEvent("stockalerts:showUsageTrends")
+-- AddEventHandler("stockalerts:showUsageTrends", function(trends)
+--     local options = {
+--         {
+--             title = "← Back to Dashboard",
+--             icon = "fas fa-arrow-left",
+--             onSelect = function()
+--                 TriggerEvent("stockalerts:openDashboard")
+--             end
+--         }
+--     }
     
-    MySQL.Async.fetchAll([[
-        SELECT ws.ingredient, ws.quantity,
-               COALESCE(ms.max_stock, ?) as max_stock
-        FROM supply_warehouse_stock ws
-        LEFT JOIN supply_market_settings ms ON ws.ingredient = ms.ingredient
-        WHERE (ws.quantity / COALESCE(ms.max_stock, ?)) * 100 <= ?
-        ORDER BY (ws.quantity / COALESCE(ms.max_stock, ?)) * 100 ASC
-    ]], {
-        tonumber(Config.StockAlerts.maxStock.default),
-        tonumber(Config.StockAlerts.maxStock.default),
-        tonumber(Config.StockAlerts.thresholds.critical),
-        tonumber(Config.StockAlerts.maxStock.default)
-    }, function(results)
-        local criticalAlerts = {}
-        local itemNames = exports.ox_inventory:Items() or {}
-        
-        for _, item in ipairs(results or {}) do
-            local percentage = (item.quantity / item.max_stock) * 100
-            table.insert(criticalAlerts, {
-                ingredient = item.ingredient,
-                label = itemNames[item.ingredient] and itemNames[item.ingredient].label or item.ingredient,
-                currentStock = item.quantity,
-                percentage = percentage,
-                alertLevel = "critical"
-            })
-        end
-        
-        TriggerClientEvent('stockalerts:showOverview', src, criticalAlerts)
-    end)
-end)
-
--- Get Usage Trends
-RegisterNetEvent('stockalerts:getUsageTrends')
-AddEventHandler('stockalerts:getUsageTrends', function()
-    local src = source
+--     if not trends or #trends == 0 then
+--         table.insert(options, {
+--             title = "No Trend Data",
+--             description = "Not enough historical data for analysis",
+--             disabled = true
+--         })
+--     else
+--         for _, trend in ipairs(trends) do
+--             local trendIcon = getTrendIcon(trend.trend)
+            
+--             table.insert(options, {
+--                 title = trend.label,
+--                 description = string.format(
+--                     "%s %s trend\n📊 Avg: %.1f/day • Peak: %.1f • Min: %.1f\n📈 %d data points",
+--                     trendIcon,
+--                     trend.trend:gsub("^%l", string.upper),
+--                     trend.avgUsage,
+--                     trend.peakUsage,
+--                     trend.minUsage,
+--                     trend.dataPoints
+--                 ),
+--                 disabled = true
+--             })
+--         end
+--     end
     
-    MySQL.Async.fetchAll([[
-        SELECT 
-            ingredient,
-            AVG(daily_usage) as avg_usage,
-            MAX(daily_usage) as peak_usage,
-            MIN(daily_usage) as min_usage,
-            COUNT(*) as data_points
-        FROM (
-            SELECT 
-                ingredient,
-                DATE(created_at) as usage_date,
-                SUM(quantity) as daily_usage
-            FROM supply_orders 
-            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-            AND status = 'completed'
-            GROUP BY ingredient, DATE(created_at)
-        ) daily_stats
-        GROUP BY ingredient
-        HAVING COUNT(*) >= 5
-        ORDER BY avg_usage DESC
-    ]], {}, function(results)
-        local trends = {}
-        local itemNames = exports.ox_inventory:Items() or {}
-        
-        for _, item in ipairs(results or {}) do
-            table.insert(trends, {
-                ingredient = item.ingredient,
-                label = itemNames[item.ingredient] and itemNames[item.ingredient].label or item.ingredient,
-                avgUsage = item.avg_usage,
-                peakUsage = item.peak_usage,
-                minUsage = item.min_usage,
-                dataPoints = item.data_points,
-                trend = item.peak_usage > item.avg_usage * 1.2 and "increasing" or 
-                       item.min_usage < item.avg_usage * 0.8 and "decreasing" or "stable"
-            })
-        end
-        
-        TriggerClientEvent('stockalerts:showUsageTrends', src, trends)
-    end)
-end)
+--     lib.registerContext({
+--         id = "usage_trends",
+--         title = "📈 Usage Trends",
+--         options = options
+--     })
+--     lib.showContext("usage_trends")
+-- end)

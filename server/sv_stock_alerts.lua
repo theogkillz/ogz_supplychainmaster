@@ -156,8 +156,8 @@ local function sendWarehouseStockEmail(playerId, alerts)
     local xPlayer = QBCore.Functions.GetPlayer(playerId)
     if not xPlayer then return end
     
-    local phoneNumber = xPlayer.PlayerData.charinfo.phone
-    if not phoneNumber then return end
+    -- REMOVED: We don't need to get phone number anymore
+    -- LBPhone integration will handle that internally
     
     local itemNames = exports.ox_inventory:Items() or {}
     
@@ -230,7 +230,7 @@ local function sendWarehouseStockEmail(playerId, alerts)
     -- Determine urgency for subject
     local urgencyLevel = #criticalAlerts > 0 and "🚨 CRITICAL" or (#lowAlerts > 0 and "⚠️ LOW" or "📊 MODERATE")
     
-    -- Send the email
+    -- Send the email - PASS PLAYER ID instead of phone number
     local emailData = {
         level = #criticalAlerts > 0 and "critical" or (#lowAlerts > 0 and "low" or "moderate"),
         itemLabel = string.format("%d items need attention", #alerts),
@@ -240,7 +240,7 @@ local function sendWarehouseStockEmail(playerId, alerts)
         recommendedOrder = 0
     }
     
-    LBPhone.SendStockAlert(phoneNumber, emailData)
+    LBPhone.SendStockAlert(playerId, emailData)  -- CHANGED: Pass playerId instead of phoneNumber
 end
 
 -- Generate stock alerts

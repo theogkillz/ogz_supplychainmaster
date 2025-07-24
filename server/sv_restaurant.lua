@@ -177,75 +177,73 @@ local dynamicPrice = math.floor(item.price * priceMultiplier)
             })
                                                                                     -- SEND ORDER NOTIFICATION EMAILS TO WAREHOUSE WORKERS
     local LBPhone = _G.LBPhone
-    if LBPhone and Config.Notifications.phone.enabled and Config.Notifications.phone.types.new_orders then
-        -- Get all online players
-        local players = QBCore.Functions.GetPlayers()
-        local itemNames = exports.ox_inventory:Items() or {}
-        
-        -- Calculate delivery requirements
-        local totalItems = 0
-        local itemsList = {}
-        
-        for _, orderItem in ipairs(orderItems) do
-            totalItems = totalItems + orderItem.quantity
-            table.insert(itemsList, {
-                label = orderItem.label,
-                quantity = orderItem.quantity
-            })
-        end
-        
-        local itemsPerContainer = (Config.ContainerSystem and Config.ContainerSystem.itemsPerContainer) or 12
-        local containersPerBox = (Config.ContainerSystem and Config.ContainerSystem.containersPerBox) or 5
-        local containersNeeded = math.ceil(totalItems / itemsPerContainer)
-        local boxesNeeded = math.ceil(containersNeeded / containersPerBox)
-        
-        -- Calculate potential earnings
-        local basePay = math.floor(totalCost * Config.DriverPayPrec)
-        local maxSpeedBonus = 40 -- 40% for lightning fast (using new balanced config)
-        local volumeBonus = boxesNeeded >= 15 and 200 or (boxesNeeded >= 10 and 125 or (boxesNeeded >= 5 and 50 or 0))
-        
-        -- Get restaurant name
-        local restaurantName = Config.Restaurants[restaurantId] and Config.Restaurants[restaurantId].name or "Unknown Restaurant"
-        
-        -- Send email to each warehouse worker
-        for _, playerId in ipairs(players) do
-            local warehousePlayer = QBCore.Functions.GetPlayer(playerId)
-            if warehousePlayer then
-                local playerJob = warehousePlayer.PlayerData.job.name
-                
-                -- Check if player has warehouse access
-                local hasAccess = false
-                for _, job in ipairs(Config.Jobs.warehouse) do
-                    if playerJob == job then
-                        hasAccess = true
-                        break
-                    end
+if LBPhone and Config.Notifications.phone.enabled and Config.Notifications.phone.types.new_orders then
+    -- Get all online players
+    local players = QBCore.Functions.GetPlayers()
+    local itemNames = exports.ox_inventory:Items() or {}
+    
+    -- Calculate delivery requirements
+    local totalItems = 0
+    local itemsList = {}
+    
+    for _, orderItem in ipairs(orderItems) do
+        totalItems = totalItems + orderItem.quantity
+        table.insert(itemsList, {
+            label = orderItem.label,
+            quantity = orderItem.quantity
+        })
+    end
+    
+    local itemsPerContainer = (Config.ContainerSystem and Config.ContainerSystem.itemsPerContainer) or 12
+    local containersPerBox = (Config.ContainerSystem and Config.ContainerSystem.containersPerBox) or 5
+    local containersNeeded = math.ceil(totalItems / itemsPerContainer)
+    local boxesNeeded = math.ceil(containersNeeded / containersPerBox)
+    
+    -- Calculate potential earnings
+    local basePay = math.floor(totalCost * Config.DriverPayPrec)
+    local maxSpeedBonus = 40 -- 40% for lightning fast (using new balanced config)
+    local volumeBonus = boxesNeeded >= 15 and 200 or (boxesNeeded >= 10 and 125 or (boxesNeeded >= 5 and 50 or 0))
+    
+    -- Get restaurant name
+    local restaurantName = Config.Restaurants[restaurantId] and Config.Restaurants[restaurantId].name or "Unknown Restaurant"
+    
+    -- Send email to each warehouse worker
+    for _, playerId in ipairs(players) do
+        local warehousePlayer = QBCore.Functions.GetPlayer(playerId)
+        if warehousePlayer then
+            local playerJob = warehousePlayer.PlayerData.job.name
+            
+            -- Check if player has warehouse access
+            local hasAccess = false
+            for _, job in ipairs(Config.Jobs.warehouse) do
+                if playerJob == job then
+                    hasAccess = true
+                    break
                 end
+            end
+            
+            if hasAccess then
+                -- CHANGED: Pass playerId instead of phoneNumber
+                -- Prepare order data for email
+                local emailOrderData = {
+                    orderId = orderGroupId,
+                    restaurantName = restaurantName,
+                    totalBoxes = boxesNeeded,
+                    items = itemsList,
+                    basePay = basePay,
+                    location = restaurantName,
+                    distance = 0, -- Could calculate actual distance if needed
+                    maxSpeedBonus = maxSpeedBonus,
+                    volumeBonus = volumeBonus,
+                    perfectBonus = Config.DriverRewards.perfectDelivery.onTimeBonus
+                }
                 
-                if hasAccess then
-                    local phoneNumber = warehousePlayer.PlayerData.charinfo.phone
-                    if phoneNumber then
-                        -- Prepare order data for email
-                        local emailOrderData = {
-                            orderId = orderGroupId,
-                            restaurantName = restaurantName,
-                            totalBoxes = boxesNeeded,
-                            items = itemsList,
-                            basePay = basePay,
-                            location = restaurantName,
-                            distance = 0, -- Could calculate actual distance if needed
-                            maxSpeedBonus = maxSpeedBonus,
-                            volumeBonus = volumeBonus,
-                            perfectBonus = Config.DriverRewards.perfectDelivery.onTimeBonus
-                        }
-                        
-                        -- Send the email
-                        LBPhone.SendOrderNotification(phoneNumber, emailOrderData)
-                    end
-                end
+                -- Send the email - PASS PLAYER ID
+                LBPhone.SendOrderNotification(playerId, emailOrderData)  -- CHANGED: Pass playerId instead of phoneNumber
             end
         end
     end
+end
         else
             xPlayer.Functions.AddMoney('bank', totalCost, "Order failed - refund")
             TriggerClientEvent('ox_lib:notify', playerId, {

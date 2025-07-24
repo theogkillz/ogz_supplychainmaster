@@ -314,11 +314,11 @@ function getBasePriceForIngredient(ingredient)
     return nil
 end
 
--- -- Save market snapshot to database
+-- Save market snapshot to database
 -- function saveMarketSnapshot()
 --     for ingredient, price in pairs(marketData.currentPrices) do
 --         MySQL.Async.execute([[
---             INSERT INTO supply_market_snapshots (id, ingredient, base_price, multiplier, final_price, stock_level, demand_level, player_count, created_at)
+--             INSERT INTO supply_market_snapshots (ingredient, base_price, multiplier, final_price, stock_level, demand_level, player_count, created_at)
 --             VALUES (?, ?, ?, ?, ?, ?)
 --         ]], {
 --             ingredient,
@@ -428,10 +428,16 @@ AddEventHandler('market:getPriceHistory', function(ingredient, returnContext)
     local src = source
     
     MySQL.Async.fetchAll([[
-        SELECT price, multiplier, timestamp, base_price 
+        SELECT 
+            market_price as price,
+            price_multiplier as multiplier,
+            recorded_at as timestamp,
+            base_price,
+            supply_level,
+            demand_level
         FROM supply_market_history 
-        WHERE ingredient = ? 
-        ORDER BY timestamp DESC 
+        WHERE item = ? 
+        ORDER BY recorded_at DESC 
         LIMIT 20
     ]], {ingredient}, function(results)
         
@@ -457,6 +463,8 @@ AddEventHandler('market:getPriceHistory', function(ingredient, returnContext)
                     multiplier = record.multiplier,
                     timestamp = record.timestamp,
                     basePrice = record.base_price,
+                    supplyLevel = record.supply_level,  -- Added supply level
+                    demandLevel = record.demand_level,  -- Added demand level
                     timeText = timeText -- Send calculated time to client
                 })
             end
