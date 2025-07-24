@@ -108,19 +108,21 @@ AddEventHandler("rewards:showDriverStatus", function(playerStats)
 end)
 
 -- Helper function to format time
-function formatTime(seconds)
-    if not seconds or seconds <= 0 then return "N/A" end
+local function formatTime(seconds)
+    -- Ensure seconds is a number
+    seconds = tonumber(seconds) or 0
     
-    local hours = math.floor(seconds / 3600)
-    local minutes = math.floor((seconds % 3600) / 60)
-    local secs = seconds % 60
-    
-    if hours > 0 then
-        return string.format("%dh %dm %ds", hours, minutes, secs)
-    elseif minutes > 0 then
-        return string.format("%dm %ds", minutes, secs)
+    if seconds < 60 then
+        return string.format("%d seconds", seconds)
+    elseif seconds < 3600 then
+        local minutes = math.floor(seconds / 60)
+        return string.format("%d minutes", minutes)
+    elseif seconds < 86400 then
+        local hours = math.floor(seconds / 3600)
+        return string.format("%d hours", hours)
     else
-        return string.format("%ds", secs)
+        local days = math.floor(seconds / 86400)
+        return string.format("%d days", days)
     end
 end
 
