@@ -543,15 +543,6 @@ AddEventHandler("restaurant:openOrderGoodsMenu", function(restaurantId)
                 TriggerEvent("restaurant:showIngredientPicker", restaurantId)
             end
         },
-        {
-            title = "🔄 Quick Reorder", 
-            description = "Reorder frequently used items",
-            icon = "fas fa-sync",
-            onSelect = function()
-                -- Could add quick reorder functionality here
-                TriggerServerEvent("restaurant:getQuickReorderItems", restaurantId)
-            end
-        }
     }
     
     lib.registerContext({
@@ -610,88 +601,88 @@ AddEventHandler("restaurant:openCategorySelection", function(restaurantId)
     lib.showContext("category_selection")
 end)
 
-RegisterNetEvent("restaurant:showQuickReorderMenu")
-AddEventHandler("restaurant:showQuickReorderMenu", function(quickItems, restaurantId)
-    local itemNames = exports.ox_inventory:Items() or {}
+-- RegisterNetEvent("restaurant:showQuickReorderMenu")
+-- AddEventHandler("restaurant:showQuickReorderMenu", function(quickItems, restaurantId)
+--     local itemNames = exports.ox_inventory:Items() or {}
     
-    local options = {
-        {
-            title = "← Back to Order Goods",
-            icon = "fas fa-arrow-left",
-            onSelect = function()
-                TriggerEvent("restaurant:openOrderGoodsMenu", restaurantId)
-            end
-        }
-    }
+--     local options = {
+--         {
+--             title = "← Back to Order Goods",
+--             icon = "fas fa-arrow-left",
+--             onSelect = function()
+--                 TriggerEvent("restaurant:openOrderGoodsMenu", restaurantId)
+--             end
+--         }
+--     }
     
-    if #quickItems == 0 then
-        table.insert(options, {
-            title = "📦 No Recent Orders",
-            description = "No order history found for quick reorder",
-            disabled = true
-        })
-    else
-        table.insert(options, {
-            title = "📊 Frequently Ordered Items (30 days)",
-            description = "Click to add common quantities to cart",
-            disabled = true
-        })
+--     if #quickItems == 0 then
+--         table.insert(options, {
+--             title = "📦 No Recent Orders",
+--             description = "No order history found for quick reorder",
+--             disabled = true
+--         })
+--     else
+--         table.insert(options, {
+--             title = "📊 Frequently Ordered Items (30 days)",
+--             description = "Click to add common quantities to cart",
+--             disabled = true
+--         })
         
-        for _, item in ipairs(quickItems) do
-            local itemLabel = itemNames[item.ingredient] and itemNames[item.ingredient].label or item.ingredient
-            local avgQuantity = math.ceil(item.total_quantity / item.order_count)
+--         for _, item in ipairs(quickItems) do
+--             local itemLabel = itemNames[item.ingredient] and itemNames[item.ingredient].label or item.ingredient
+--             local avgQuantity = math.ceil(item.total_quantity / item.order_count)
             
-            table.insert(options, {
-                title = itemLabel,
-                description = string.format("Ordered %d times • Avg: %d units • Recently ordered", 
-                item.order_count, avgQuantity),
-                onSelect = function()
-                    local input = lib.inputDialog("Quick Reorder: " .. itemLabel, {
-                        { 
-                            type = "number", 
-                            label = "Quantity", 
-                            placeholder = "Suggested: " .. avgQuantity,
-                            default = avgQuantity,
-                            min = 1, 
-                            max = 999, 
-                            required = true 
-                        }
-                    })
-                    if input and input[1] and tonumber(input[1]) > 0 then
-                        local quantity = tonumber(input[1])
+--             table.insert(options, {
+--                 title = itemLabel,
+--                 description = string.format("Ordered %d times • Avg: %d units • Recently ordered", 
+--                 item.order_count, avgQuantity),
+--                 onSelect = function()
+--                     local input = lib.inputDialog("Quick Reorder: " .. itemLabel, {
+--                         { 
+--                             type = "number", 
+--                             label = "Quantity", 
+--                             placeholder = "Suggested: " .. avgQuantity,
+--                             default = avgQuantity,
+--                             min = 1, 
+--                             max = 999, 
+--                             required = true 
+--                         }
+--                     })
+--                     if input and input[1] and tonumber(input[1]) > 0 then
+--                         local quantity = tonumber(input[1])
                         
-                        -- Get price from config
-                        local restaurantJob = Config.Restaurants[restaurantId].job
-                        local price = 0
-                        for category, categoryItems in pairs(Config.Items[restaurantJob]) do
-                            if categoryItems[item.ingredient] then
-                                price = categoryItems[item.ingredient].price
-                                break
-                            end
-                        end
+--                         -- Get price from config
+--                         local restaurantJob = Config.Restaurants[restaurantId].job
+--                         local price = 0
+--                         for category, categoryItems in pairs(Config.Items[restaurantJob]) do
+--                             if categoryItems[item.ingredient] then
+--                                 price = categoryItems[item.ingredient].price
+--                                 break
+--                             end
+--                         end
                         
-                        addToCart(item.ingredient, quantity, itemLabel, price)
+--                         addToCart(item.ingredient, quantity, itemLabel, price)
                         
-                        lib.notify({
-                            title = "Added to Cart",
-                            description = quantity .. "x " .. itemLabel .. " (Quick Reorder)",
-                            type = "success",
-                            duration = 5000,
-                            position = Config.UI.notificationPosition,
-                            markdown = Config.UI.enableMarkdown
-                        })
+--                         lib.notify({
+--                             title = "Added to Cart",
+--                             description = quantity .. "x " .. itemLabel .. " (Quick Reorder)",
+--                             type = "success",
+--                             duration = 5000,
+--                             position = Config.UI.notificationPosition,
+--                             markdown = Config.UI.enableMarkdown
+--                         })
                         
-                        TriggerEvent("restaurant:showQuickReorderMenu", quickItems, restaurantId)
-                    end
-                end
-            })
-        end
-    end
+--                         TriggerEvent("restaurant:showQuickReorderMenu", quickItems, restaurantId)
+--                     end
+--                 end
+--             })
+--         end
+--     end
     
-    lib.registerContext({
-        id = "quick_reorder_menu",
-        title = "🔄 Quick Reorder",
-        options = options
-    })
-    lib.showContext("quick_reorder_menu")
-end)
+--     lib.registerContext({
+--         id = "quick_reorder_menu",
+--         title = "🔄 Quick Reorder",
+--         options = options
+--     })
+--     lib.showContext("quick_reorder_menu")
+-- end)
