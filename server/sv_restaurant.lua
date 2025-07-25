@@ -168,12 +168,12 @@ local dynamicPrice = math.floor(item.price * priceMultiplier)
             end
             
             TriggerClientEvent('ox_lib:notify', playerId, {
-    title = 'Order Submitted',
-    description = string.format('Total: $%d', totalCost),
-    type = 'success',
-    duration = 3000,  -- Quick confirmation
-    position = Config.UI.notificationPosition
-})
+                title = 'Order Submitted',
+                description = string.format('Total: $%d', totalCost),
+                type = 'success',
+                duration = 3000,  -- Quick confirmation
+                position = Config.UI.notificationPosition
+            })
                                                                                     -- SEND ORDER NOTIFICATION EMAILS TO WAREHOUSE WORKERS
     local LBPhone = _G.LBPhone
 if LBPhone and Config.Notifications.phone.enabled and Config.Notifications.phone.types.new_orders then

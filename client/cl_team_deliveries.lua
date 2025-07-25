@@ -477,7 +477,7 @@ AddEventHandler("team:spawnDeliveryVehicle", function(teamData)
         markdown = Config.UI.enableMarkdown
     })
 
-    SetEntityCoords(playerPed, warehouseConfig.vehicle.position.x + 2.0, warehouseConfig.vehicle.position.y, warehouseConfig.vehicle.position.z, false, false, false, true)
+    -- SetEntityCoords(playerPed, warehouseConfig.vehicle.position.x + 2.0, warehouseConfig.vehicle.position.y, warehouseConfig.vehicle.position.z, false, false, false, true)
     
     -- Use team-specific loading system
     TriggerEvent("team:loadTeamBoxes", warehouseConfig, van, teamData)

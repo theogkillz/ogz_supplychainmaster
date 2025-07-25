@@ -385,7 +385,7 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
         cancel = true
     })
 
-    DoScreenFadeOut(2500)
+    -- DoScreenFadeOut(2500)
     Citizen.Wait(2500)
 
     local playerPed = PlayerPedId()
@@ -417,7 +417,7 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
     
     print("[DEBUG] Van spawned with entity ID:", van, "for", boxesNeeded, "boxes")
 
-    DoScreenFadeIn(2500)
+    -- DoScreenFadeIn(2500)
 
     lib.notify({
         title = "📦 " .. (boxesNeeded > 7 and "LARGE " or boxesNeeded > 3 and "MEDIUM " or "") .. "Delivery Ready",
@@ -428,7 +428,7 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
         markdown = Config.UI.enableMarkdown
     })
 
-    SetEntityCoords(playerPed, warehouseConfig.vehicle.position.x + 2.0, warehouseConfig.vehicle.position.y, warehouseConfig.vehicle.position.z, false, false, false, true)
+    -- SetEntityCoords(playerPed, warehouseConfig.vehicle.position.x + 2.0, warehouseConfig.vehicle.position.y, warehouseConfig.vehicle.position.z, false, false, false, true)
     
     -- Use enhanced multi-box loading if more than 1 box needed
     if boxesNeeded > 1 then
