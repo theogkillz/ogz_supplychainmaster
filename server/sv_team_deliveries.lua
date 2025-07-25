@@ -633,6 +633,17 @@ completeTeamDelivery = function(teamId, completionTimes)
         
         table.insert(teamMembers, citizenid)
         totalTeamPayout = totalTeamPayout + finalPay
+        
+        -- Update player stats
+        if exports['ogz_supplychainmaster'] and exports['ogz_supplychainmaster']['updatePlayerStats'] then
+            exports['ogz_supplychainmaster']:updatePlayerStats(citizenid, {
+                isTeam = true,
+                isPerfect = speedBonus >= 1.4, -- Lightning fast
+                perfectSync = coordinationBonus and coordinationBonus.name == "⚡ Perfect Sync",
+                earnings = finalPay,
+                experience = 10 + (coordinationBonus and 5 or 0) -- Bonus XP for good coordination
+            })
+        end
     end
     
     -- Update team statistics for leaderboard
@@ -851,4 +862,9 @@ AddEventHandler('team:leaveDelivery', function(teamId)
     if memberCount == 0 then
         activeTeamDeliveries[teamId] = nil
     end
+end)
+
+-- Export to access active team deliveries from other scripts
+exports('getActiveTeamDelivery', function(teamId)
+    return activeTeamDeliveries[teamId]
 end)
