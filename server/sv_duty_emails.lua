@@ -150,14 +150,14 @@ Head to the warehouse to accept these orders!
         end
         
         -- Also send a notification
-        TriggerClientEvent('ox_lib:notify', playerId, {
-            title = '📋 Duty Report Sent',
-            description = string.format('%d pending orders available. Check your email!', totalOrders),
-            type = 'info',
-            duration = 8000,
-            position = Config.UI.notificationPosition,
-            markdown = Config.UI.enableMarkdown
-        })
+        -- TriggerClientEvent('ox_lib:notify', playerId, {
+        --     title = '📋 Duty Report Sent',
+        --     description = string.format('%d pending orders available. Check your email!', totalOrders),
+        --     type = 'info',
+        --     duration = 8000,
+        --     position = Config.UI.notificationPosition,
+        --     markdown = Config.UI.enableMarkdown
+        -- })
     end)
 end
 

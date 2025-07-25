@@ -273,21 +273,11 @@ showRewardNotification = function(playerId, rewardData)
     
     -- Send the regular notification
     TriggerClientEvent('ox_lib:notify', playerId, {
-        title = '💰 DELIVERY COMPLETED!',
-        description = string.format(
-            "📦 **%d boxes delivered**\n💵 Base Pay: $%d\n💎 Bonus: +$%d\n💰 **TOTAL: $%d**%s%s%s",
-            rewardData.boxes,
-            rewardData.basePay,
-            totalBonusAmount,
-            rewardData.finalPayout,
-            bonusText,
-            multiplierText,
-            streakText
-        ),
+        title = '💰 Delivery Complete!',
+        description = string.format('Earned $%d - Check email for details', rewardData.finalPayout),
         type = 'success',
-        duration = 15000,
-        position = Config.UI.notificationPosition,
-        markdown = Config.UI.enableMarkdown
+        duration = 5000,  -- Reduced from 15000
+        position = Config.UI.notificationPosition
     })
     
     -- SEND DELIVERY RECEIPT EMAIL

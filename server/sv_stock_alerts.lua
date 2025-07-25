@@ -317,8 +317,8 @@ sendStockAlerts = function(alerts)
             end
         end
         
-        -- Send to restaurant owners/bosses (existing functionality)
-        if isBoss and not isWarehouseWorker then
+        -- Send NOTIFICATIONS ONLY to restaurant owners/bosses (NOT warehouse workers)
+        if isBoss and not isWarehouseWorker then  -- KEEP THIS
             for _, alert in ipairs(alerts) do
                 -- Check if this item is relevant to their restaurant
                 local isRelevant = false
@@ -350,6 +350,7 @@ sendStockAlerts = function(alerts)
                         alert.prediction and string.format("📈 Trend: **%s** (%.0f%% confidence)", alert.prediction.trend, alert.prediction.confidence * 100) or ""
                     )
                     
+                    -- Restaurant bosses still get notifications (they don't get emails)
                     TriggerClientEvent('ox_lib:notify', playerId, {
                         title = alertIcon .. ' Stock Alert',
                         description = description,
@@ -362,7 +363,7 @@ sendStockAlerts = function(alerts)
             end
         end
         
-        -- Send emails to warehouse workers
+        -- Warehouse workers ONLY get emails (no notifications)
         if isWarehouseWorker and LBPhone and Config.Notifications.phone.enabled and Config.Notifications.phone.types.stock_alerts then
             -- Collect this player for warehouse email
             if not warehouseAlerts[playerId] then
@@ -373,9 +374,10 @@ sendStockAlerts = function(alerts)
         ::continue::
     end
     
-    -- Send combined email to all warehouse workers
+    -- Send combined email to all warehouse workers (no notification)
     for playerId, _ in pairs(warehouseAlerts) do
         sendWarehouseStockEmail(playerId, alerts)
+        -- NO NOTIFICATION HERE - Email is enough
     end
 end
 
