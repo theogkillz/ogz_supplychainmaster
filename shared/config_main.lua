@@ -85,7 +85,7 @@ Config.LowStock = {
     threshold = 25 -- Notify when stock is below this
 }
 
-Config.maxBoxes = 6 -- Max boxes for team deliveries (2 players)
+-- Config.maxBoxes = 6 -- Max boxes for team deliveries (2 players)
 Config.DriverPayPrec = 0.22 -- Driver payment percentage
 
 -- ===================================
@@ -391,6 +391,135 @@ Config.EmergencyOrders = {
             timeout = 7200,  -- 2 hours
             broadcastToAll = false
         }
+    }
+}
+
+-- ===================================
+-- TEAM DELIVERY SYSTEM
+-- ===================================
+Config.TeamDeliveries = {
+    enabled = true,
+    
+    -- Minimum requirements
+    minBoxesForTeam = 5,        -- Minimum boxes to create team delivery
+    maxTeamSize = 6,            -- Maximum team members
+    minTeamSize = 2,            -- Minimum to start delivery
+    
+    -- Delivery types (for different order sizes)
+    deliveryTypes = {
+        duo = {
+            name = "🚐 Duo Delivery",
+            description = "Quick 2-person team job",
+            minBoxes = 5,
+            maxBoxes = 10,
+            requiredMembers = 2,
+            maxMembers = 2
+        },
+        squad = {
+            name = "🚚 Squad Delivery", 
+            description = "Medium team operation",
+            minBoxes = 11,
+            maxBoxes = 20,
+            requiredMembers = 3,
+            maxMembers = 4
+        },
+        convoy = {
+            name = "🚛 Convoy Delivery",
+            description = "Large coordinated operation",
+            minBoxes = 21,
+            maxBoxes = 50,
+            requiredMembers = 4,
+            maxMembers = 6
+        }
+    },
+    
+    -- BALANCED Team bonuses (competitive but not overpowered)
+    teamBonuses = {
+        { size = 2, multiplier = 1.15, name = "👥 Duo Team" },      -- 15% bonus
+        { size = 3, multiplier = 1.20, name = "🚚 Squad Team" },    -- 20% bonus
+        { size = 4, multiplier = 1.25, name = "🚛 Small Convoy" },  -- 25% bonus
+        { size = 5, multiplier = 1.30, name = "🚛 Full Convoy" },   -- 30% bonus
+        { size = 6, multiplier = 1.35, name = "🚛 Mega Convoy" }    -- 35% bonus
+    },
+    
+    -- Coordination bonuses (skill-based, not just time)
+    coordinationBonuses = {
+        {
+            name = "⚡ Perfect Sync",
+            maxTimeDiff = 15,        -- All arrive within 15 seconds
+            bonus = 100,             -- $100 flat bonus per member
+            requirements = {
+                noDamage = true,     -- No vehicle damage
+                allMembers = true    -- All members must complete
+            }
+        },
+        {
+            name = "🎯 Great Coordination",
+            maxTimeDiff = 30,
+            bonus = 50              -- $50 per member
+        },
+        {
+            name = "✅ Good Teamwork",
+            maxTimeDiff = 60,
+            bonus = 25              -- $25 per member
+        },
+        {
+            name = "Basic Completion",
+            maxTimeDiff = 120,
+            bonus = 0               -- No bonus after 2 minutes
+        }
+    },
+    
+    -- Team roles (optional feature for future)
+    roles = {
+        leader = {
+            name = "Team Leader",
+            perks = {
+                routePlanning = true,    -- Can set waypoints for team
+                bonusMultiplier = 1.1    -- 10% extra for leadership
+            }
+        },
+        driver = {
+            name = "Driver",
+            perks = {
+                vehicleBonus = true,     -- Slightly better vehicle handling
+                bonusMultiplier = 1.0
+            }
+        }
+    },
+    
+    -- Competitive features
+    competitive = {
+        enableLeaderboard = true,
+        weeklyReset = true,
+        
+        -- Team achievements
+        achievements = {
+            first_team_delivery = { reward = 250, name = "Teamwork Makes the Dream Work" },
+            perfect_convoy = { reward = 500, name = "Perfect Convoy" },
+            speed_team = { reward = 750, name = "Speed Team Champions" },
+            weekly_team_best = { reward = 1000, name = "Team of the Week" }
+        },
+        
+        -- Team challenges
+        challenges = {
+            daily = {
+                { boxes = 25, reward = 200, name = "Daily Team Goal" },
+                { boxes = 50, reward = 500, name = "Daily Team Champion" }
+            },
+            weekly = {
+                { boxes = 200, reward = 2000, name = "Weekly Team Goal" },
+                { boxes = 500, reward = 5000, name = "Weekly Team Legend" }
+            }
+        }
+    },
+    
+    -- Anti-exploit measures
+    antiExploit = {
+        maxDeliveriesPerHour = 10,      -- Per team member
+        cooldownBetweenTeamJobs = 300,  -- 5 minutes
+        requireUniqueMembers = true,     -- Can't use alt accounts
+        minDistanceForBonus = 500        -- Minimum distance for coordination bonus
     }
 }
 

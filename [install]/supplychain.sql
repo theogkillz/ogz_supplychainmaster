@@ -159,43 +159,52 @@ CREATE TABLE IF NOT EXISTS `supply_daily_bonuses` (
   KEY `idx_bonus_date` (`bonus_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
 
--- Team Delivery Database Table
-
+-- Team deliveries tracking table
 CREATE TABLE IF NOT EXISTS `supply_team_deliveries` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `team_id` varchar(100) NOT NULL,
-  `order_group_id` varchar(100) NOT NULL,
-  `restaurant_id` int(11) NOT NULL,
-  `leader_citizenid` varchar(50) NOT NULL,
-  `member_count` int(11) NOT NULL,
-  `total_boxes` int(11) NOT NULL,
-  `delivery_type` varchar(50) NOT NULL,
-  `coordination_bonus` decimal(10,2) DEFAULT 0.00,
-  `team_multiplier` decimal(4,2) DEFAULT 1.00,
-  `completion_time` int(11) NOT NULL,
-  `total_payout` decimal(10,2) DEFAULT 0.00,
-  `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_team_id` (`team_id`),
-  KEY `idx_leader_citizenid` (`leader_citizenid`),
-  KEY `idx_created_at` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `team_id` varchar(50) NOT NULL,
+    `order_group_id` varchar(50) NOT NULL,
+    `restaurant_id` int(11) NOT NULL,
+    `leader_citizenid` varchar(50) NOT NULL,
+    `member_count` int(11) NOT NULL DEFAULT 2,
+    `total_boxes` int(11) NOT NULL,
+    `delivery_type` varchar(50) NOT NULL DEFAULT 'duo',
+    `coordination_bonus` decimal(10,2) DEFAULT 0.00,
+    `team_multiplier` decimal(3,2) DEFAULT 1.00,
+    `completion_time` int(11) NOT NULL COMMENT 'Time difference in seconds between first and last arrival',
+    `total_payout` decimal(10,2) NOT NULL,
+    `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_team_id` (`team_id`),
+    KEY `idx_leader` (`leader_citizenid`),
+    KEY `idx_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Team delivery members tracking
+-- Team members tracking (for detailed stats)
 CREATE TABLE IF NOT EXISTS `supply_team_members` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `team_id` varchar(100) NOT NULL,
-  `citizenid` varchar(50) NOT NULL,
-  `name` varchar(100) NOT NULL,
-  `boxes_assigned` int(11) NOT NULL,
-  `completion_time` int(11) DEFAULT 0,
-  `individual_payout` decimal(10,2) DEFAULT 0.00,
-  `role` enum('leader','member') DEFAULT 'member',
-  `joined_at` timestamp DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_team_id` (`team_id`),
-  KEY `idx_citizenid` (`citizenid`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `team_delivery_id` int(11) NOT NULL,
+    `citizenid` varchar(50) NOT NULL,
+    `role` varchar(20) NOT NULL DEFAULT 'member',
+    `boxes_assigned` int(11) NOT NULL,
+    `individual_payout` decimal(10,2) NOT NULL,
+    `completion_order` int(11) NOT NULL COMMENT 'Order of arrival (1 = first, 2 = second, etc)',
+    `vehicle_damaged` tinyint(1) DEFAULT 0,
+    PRIMARY KEY (`id`),
+    KEY `idx_citizenid` (`citizenid`),
+    KEY `idx_team_delivery` (`team_delivery_id`),
+    CONSTRAINT `fk_team_delivery` FOREIGN KEY (`team_delivery_id`) REFERENCES `supply_team_deliveries` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Add team delivery stats to player stats
+ALTER TABLE `supply_player_stats` 
+ADD COLUMN IF NOT EXISTS `team_deliveries` int(11) NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS `perfect_syncs` int(11) NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS `team_earnings` decimal(10,2) NOT NULL DEFAULT 0.00;
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS `idx_team_weekly` ON `supply_team_deliveries` (`created_at`, `team_id`);
+CREATE INDEX IF NOT EXISTS `idx_member_stats` ON `supply_team_members` (`citizenid`, `role`);
 
 -- Stock Analytics and Alerts Database Tables
 

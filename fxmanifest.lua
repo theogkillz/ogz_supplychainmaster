@@ -40,6 +40,8 @@ client_scripts {
     'client/cl_vehicle_achievements.lua',
     'client/cl_vehicle_achievement_handler.lua',
     'client/cl_achievement_progress.lua',
+    'client/cl_team_leaderboard.lua',
+    'client/cl_team_vehicle_handler.lua',
     -- 'client/cl_npc_surplus.lua',
     
     -- Administration
@@ -65,6 +67,8 @@ server_scripts {
     'server/sv_performance_tracking.lua',
     'server/sv_leaderboard.lua',
     'server/sv_achievements.lua',
+    'server/sv_team_leaderboard.lua',
+    'server/sv_team_vehicle_handler.lua',
     -- 'server/sv_npc_surplus.lua',
 
     

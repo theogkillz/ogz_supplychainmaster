@@ -1,3 +1,5 @@
+local QBCore = exports['qb-core']:GetCoreObject()
+
 -- Team delivery variables
 local currentTeam = nil
 local teamDeliveryData = nil
@@ -177,63 +179,134 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId)
     
     local options = {
         {
-            title = "📢 Share Team ID",
-            description = "Give other drivers this ID: " .. teamId,
-            icon = "fas fa-share",
-            onSelect = function()
-                -- Copy to clipboard functionality could go here
-                lib.notify({
-                    title = "Team ID",
-                    description = "Share this ID with other drivers: **" .. teamId .. "**",
-                    type = "info",
-                    duration = 15000,
-                    position = Config.UI.notificationPosition,
-                    markdown = Config.UI.enableMarkdown
-                })
-            end
+            title = string.format("📋 Team ID: %s", teamId),
+            description = "Share this ID with other drivers to join",
+            icon = "fas fa-clipboard",
+            disabled = true  -- Just for display
         },
         {
             title = "👥 Team Status",
-            description = "View current team members and ready status",
+            description = "View members and coordination stats",
             icon = "fas fa-users",
             onSelect = function()
-                TriggerEvent("team:showTeamStatus", teamId)
+                TriggerServerEvent("team:getTeamStatus", teamId)
             end
         },
         {
-            title = "✅ Ready Up",
-            description = "Mark yourself as ready to start",
-            icon = "fas fa-check",
+            title = isReady and "✅ Ready" or "⏸️ Not Ready",
+            description = isReady and "Click to unready" or "Click when ready to start",
+            icon = isReady and "fas fa-check-circle" or "fas fa-pause-circle",
             onSelect = function()
-                TriggerServerEvent("team:setReady", teamId, true)
+                isReady = not isReady
+                TriggerServerEvent("team:setReady", teamId, isReady)
             end
         },
         {
-            title = "❌ Not Ready",
-            description = "Mark yourself as not ready",
-            icon = "fas fa-times",
+            title = "🏆 Team Leaderboard",
+            description = "Check team rankings and challenges",
+            icon = "fas fa-trophy",
             onSelect = function()
-                TriggerServerEvent("team:setReady", teamId, false)
+                TriggerEvent("team:openLeaderboardMenu")
+            end
+        },
+        {
+            title = "📊 Performance Tips",
+            description = "Learn coordination strategies",
+            icon = "fas fa-chart-line",
+            onSelect = function()
+                TriggerEvent("team:showPerformanceTips")
             end
         },
         {
             title = "🚪 Leave Team",
-            description = "Leave this team delivery",
+            description = "Exit and find another team",
             icon = "fas fa-door-open",
             onSelect = function()
-                -- Implementation for leaving team
-                currentTeam = nil
-                TriggerEvent("warehouse:openProcessingMenu")
+                lib.alertDialog({
+                    header = "Leave Team?",
+                    content = "Are you sure you want to leave this team?",
+                    centered = true,
+                    cancel = true,
+                    labels = {
+                        cancel = "Stay",
+                        confirm = "Leave"
+                    }
+                }, function(response)
+                    if response == "confirm" then
+                        currentTeam = nil
+                        isReady = false
+                        TriggerServerEvent("team:leaveDelivery", teamId)
+                    end
+                end)
             end
         }
     }
     
     lib.registerContext({
         id = "team_recruitment",
-        title = "🚛 Team Recruitment",
+        title = "🚛 Team Coordination",
         options = options
     })
     lib.showContext("team_recruitment")
+end)
+
+-- Team status display
+RegisterNetEvent("team:showTeamStatus")
+AddEventHandler("team:showTeamStatus", function(teamData)
+    local options = {}
+    
+    -- Team composition header
+    table.insert(options, {
+        title = string.format("👥 Team Size: %d/%d", #teamData.members, Config.TeamDeliveries.maxTeamSize),
+        description = string.format("Delivery Type: %s", teamData.deliveryTypeName),
+        disabled = true
+    })
+    
+    -- Member list with ready status
+    for i, member in ipairs(teamData.members) do
+        local roleIcon = member.isLeader and "👑" or "👤"
+        local readyIcon = member.ready and "✅" or "⏳"
+        
+        table.insert(options, {
+            title = string.format("%s %s %s", roleIcon, member.name, readyIcon),
+            description = string.format("Boxes: %d | %s", 
+                member.boxesAssigned, 
+                member.ready and "Ready" or "Not Ready"),
+            disabled = true
+        })
+    end
+    
+    -- Team bonus preview
+    local teamBonus = Config.TeamDeliveries.teamBonuses[#teamData.members] or {multiplier = 1.0, name = "No bonus"}
+    table.insert(options, {
+        title = "💰 Team Bonus Preview",
+        description = string.format("%s - %.1fx multiplier", teamBonus.name, teamBonus.multiplier),
+        icon = "fas fa-coins",
+        disabled = true
+    })
+    
+    -- Coordination tips
+    table.insert(options, {
+        title = "💡 Coordination Tip",
+        description = "Arrive within 15 seconds for Perfect Sync bonus!",
+        icon = "fas fa-lightbulb",
+        disabled = true
+    })
+    
+    table.insert(options, {
+        title = "← Back",
+        icon = "fas fa-arrow-left",
+        onSelect = function()
+            TriggerEvent("team:showRecruitmentMenu", currentTeam)
+        end
+    })
+    
+    lib.registerContext({
+        id = "team_status",
+        title = "📊 Team Status",
+        options = options
+    })
+    lib.showContext("team_status")
 end)
 
 -- Show available teams to join
