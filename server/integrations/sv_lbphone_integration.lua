@@ -1,6 +1,6 @@
--- server/sv_lbphone_integration.lua
+-- server/integrations/sv_lbphone_integration.lua
 -- ===============================================
--- LB-PHONE EMAIL INTEGRATION
+-- LB-PHONE EMAIL INTEGRATION - FIXED VERSION
 -- ===============================================
 
 local QBCore = exports['qb-core']:GetCoreObject()
@@ -22,21 +22,101 @@ local EmailConfig = {
         sender = "emergency@supply.chain",
         senderName = "Emergency Response System",
         icon = "🚨"
+    },
+    dutyAlerts = {
+        sender = "duty@supply.chain",
+        senderName = "Duty Management System",
+        icon = "📋"
     }
 }
 
 -- ===============================================
--- HELPER FUNCTION TO GET EMAIL FROM PHONE NUMBER
+-- HELPER FUNCTIONS
 -- ===============================================
 
-local function getEmailFromPhoneNumber(phoneNumber)
-    -- Check if phone number is valid
-    if not phoneNumber then
-        print("[LBPhone] ERROR: No phone number provided to getEmailFromPhoneNumber")
+-- Convert HTML email to plain text with icons
+local function htmlToPlainText(htmlContent)
+    -- Remove HTML tags but keep line breaks
+    local plainText = htmlContent
+    
+    -- Replace headers with uppercase text
+    plainText = plainText:gsub("<h1>(.-)</h1>", "\n=== %1 ===\n")
+    plainText = plainText:gsub("<h2>(.-)</h2>", "\n--- %1 ---\n")
+    plainText = plainText:gsub("<h3>(.-)</h3>", "\n%1:\n")
+    
+    -- Replace styling
+    plainText = plainText:gsub('<span style="color: %w+;">(.-)</span>', "%1")
+    plainText = plainText:gsub('<span style="[^"]-">(.-)</span>', "%1")
+    
+    -- Replace breaks and paragraphs
+    plainText = plainText:gsub("<br>", "\n")
+    plainText = plainText:gsub("<br/>", "\n")
+    plainText = plainText:gsub("<br />", "\n")
+    plainText = plainText:gsub("<p>", "\n")
+    plainText = plainText:gsub("</p>", "\n")
+    
+    -- Replace lists
+    plainText = plainText:gsub("•", "-")
+    plainText = plainText:gsub("<ul>", "\n")
+    plainText = plainText:gsub("</ul>", "\n")
+    plainText = plainText:gsub("<li>(.-)</li>", "- %1\n")
+    
+    -- Replace bold/italic
+    plainText = plainText:gsub("<b>(.-)</b>", "*%1*")
+    plainText = plainText:gsub("<strong>(.-)</strong>", "*%1*")
+    plainText = plainText:gsub("<i>(.-)</i>", "_%1_")
+    plainText = plainText:gsub("<em>(.-)</em>", "_%1_")
+    
+    -- Replace horizontal rules
+    plainText = plainText:gsub("<hr>", "\n" .. string.rep("-", 40) .. "\n")
+    plainText = plainText:gsub("<hr/>", "\n" .. string.rep("-", 40) .. "\n")
+    plainText = plainText:gsub("<hr />", "\n" .. string.rep("-", 40) .. "\n")
+    
+    -- Remove any remaining HTML tags
+    plainText = plainText:gsub("<[^>]+>", "")
+    
+    -- Clean up excessive newlines
+    plainText = plainText:gsub("\n\n\n+", "\n\n")
+    
+    -- Trim whitespace
+    plainText = plainText:gsub("^%s+", ""):gsub("%s+$", "")
+    
+    return plainText
+end
+
+-- Get player's phone number from source
+local function getPlayerPhoneNumber(source)
+    if not source or type(source) ~= "number" then
+        print("[LBPhone] ERROR: Invalid source provided:", source)
         return nil
     end
     
-    -- Get email address from phone number
+    -- Get equipped phone number from LB-Phone
+    local success, phoneNumber = pcall(function()
+        return exports["lb-phone"]:GetEquippedPhoneNumber(source)
+    end)
+    
+    if success and phoneNumber then
+        return phoneNumber
+    end
+    
+    -- Fallback to QBCore character data
+    local xPlayer = QBCore.Functions.GetPlayer(source)
+    if xPlayer and xPlayer.PlayerData.charinfo.phone then
+        print("[LBPhone] WARNING: Using charinfo phone (player may not have phone equipped)")
+        return xPlayer.PlayerData.charinfo.phone
+    end
+    
+    return nil
+end
+
+-- Get email address from phone number
+local function getEmailFromPhoneNumber(phoneNumber)
+    if not phoneNumber then
+        print("[LBPhone] ERROR: No phone number provided")
+        return nil
+    end
+    
     local success, email = pcall(function()
         return exports["lb-phone"]:GetEmailAddress(phoneNumber)
     end)
@@ -46,421 +126,345 @@ local function getEmailFromPhoneNumber(phoneNumber)
         return nil
     end
     
-    if not email then
-        print("[LBPhone] No email address found for phone number:", phoneNumber)
-        return nil
-    end
-    
     return email
 end
 
 -- ===============================================
--- GET PLAYER'S ACTUAL PHONE NUMBER
--- ===============================================
-
-local function getPlayerActualPhoneNumber(source)
-    -- Validate source
-    if not source or type(source) ~= "number" then
-        print("[LBPhone] ERROR: Invalid source provided:", source)
-        return nil
-    end
-    
-    -- First try to get the equipped phone number from lb-phone
-    local success, equippedPhone = pcall(function()
-        return exports["lb-phone"]:GetEquippedPhoneNumber(source)
-    end)
-    
-    if success and equippedPhone then
-        print("[LBPhone] Using equipped phone number:", equippedPhone, "for player:", source)
-        return equippedPhone
-    end
-    
-    -- If that failed, log the error
-    if not success then
-        print("[LBPhone] ERROR: Failed to get equipped phone:", equippedPhone)
-    else
-        print("[LBPhone] Player has no equipped phone, checking charinfo...")
-    end
-    
-    -- Fallback to character data if no equipped phone
-    local xPlayer = QBCore.Functions.GetPlayer(source)
-    if xPlayer and xPlayer.PlayerData.charinfo.phone then
-        print("[LBPhone] WARNING: Using charinfo phone number (not equipped):", xPlayer.PlayerData.charinfo.phone)
-        return xPlayer.PlayerData.charinfo.phone
-    end
-    
-    print("[LBPhone] ERROR: No phone number found for player:", source)
-    return nil
-end
-
--- ===============================================
--- UNIFIED EMAIL SENDING FUNCTION
+-- MAIN EMAIL SENDING FUNCTION
 -- ===============================================
 
 local function sendEmailToPlayer(playerId, emailData)
-    -- Validate player ID
-    if not playerId then
-        print("[LBPhone] ERROR: No player ID provided to sendEmailToPlayer")
+    -- Validate input
+    if not playerId or type(playerId) ~= "number" then
+        print("[LBPhone] ERROR: Invalid player ID:", playerId)
         return false
     end
     
-    -- Get the player's actual phone number from lb-phone
-    local phoneNumber = getPlayerActualPhoneNumber(playerId)
+    -- Get phone number
+    local phoneNumber = getPlayerPhoneNumber(playerId)
     if not phoneNumber then
-        print("[LBPhone] ERROR: Failed to get phone number for player:", playerId)
-        -- Try one more time with a small delay
-        Citizen.Wait(100)
-        phoneNumber = getPlayerActualPhoneNumber(playerId)
-        if not phoneNumber then
-            print("[LBPhone] ERROR: Player has no equipped phone after retry:", playerId)
-            return false
-        end
+        print("[LBPhone] ERROR: No phone number found for player:", playerId)
+        return false
     end
     
-    -- Get email address from phone number
+    -- Get email address
     local email = getEmailFromPhoneNumber(phoneNumber)
     if not email then
-        print("[LBPhone] ERROR: Failed to get email address for phone:", phoneNumber, "Player:", playerId)
+        print("[LBPhone] WARNING: No email address for phone:", phoneNumber)
+        -- Player hasn't set up email yet - notify them
+        TriggerClientEvent('ox_lib:notify', playerId, {
+            title = '📧 Email Setup Required',
+            description = 'Please set up an email account in your phone to receive supply chain notifications',
+            type = 'warning',
+            duration = 8000,
+            position = Config.UI.notificationPosition
+        })
         return false
     end
     
-    -- Send the email
-    emailData.to = email
-    local success, result = pcall(function()
-        return exports["lb-phone"]:SendMail(emailData)
+    -- Convert HTML message to plain text if needed
+    if emailData.message and emailData.message:find("<") then
+        emailData.message = htmlToPlainText(emailData.message)
+    end
+    
+    -- Prepare email data
+    local mailData = {
+        to = email,
+        sender = emailData.sender,
+        subject = emailData.subject,
+        message = emailData.message,
+        attachments = emailData.attachments,
+        actions = emailData.actions
+    }
+    
+    -- Send email
+    local success, emailId = pcall(function()
+        return exports["lb-phone"]:SendMail(mailData)
     end)
     
-    if not success then
-        print("[LBPhone] ERROR: Failed to send email:", result)
+    if success and emailId then
+        print(string.format("[LBPhone] Email sent successfully - ID: %s, To: %s", emailId, email))
+        return true, emailId
+    else
+        print(string.format("[LBPhone] Failed to send email to %s - Error: %s", email, tostring(emailId)))
         return false
     end
-    
-    local emailId = result
-    
-    if success and result then
-        print(string.format("[LBPhone] Email sent successfully to %s (phone: %s)", email, phoneNumber))
-    else
-        print(string.format("[LBPhone] Failed to send email to %s (phone: %s)", email, phoneNumber))
-    end
-    
-    return success and result, emailId
 end
 
 -- ===============================================
--- STOCK ALERT EMAILS
+-- PUBLIC FUNCTIONS
 -- ===============================================
 
+-- Stock Alert Emails
 function LBPhone.SendStockAlert(playerId, alertData)
-    -- THIS FUNCTION NOW EXPECTS A PLAYER ID, NOT PHONE NUMBER
-    local playerId = phoneNumber -- Rename for clarity in future update
-    
-    -- Build email content based on alert level
+    local urgencyIcon = ""
     local subject = ""
     local message = ""
-    local urgencyIcon = ""
     
     if alertData.level == "critical" then
         urgencyIcon = "🚨"
-        subject = string.format("%s CRITICAL: %s Stock at %d%%", urgencyIcon, alertData.itemLabel, alertData.percentage)
+        subject = string.format("%s CRITICAL: %s Stock at %d%%", 
+            urgencyIcon, alertData.itemLabel, alertData.percentage)
+        
         message = string.format([[
-<h2>%s Critical Stock Alert</h2>
-<br>
-<b>Item:</b> %s<br>
-<b>Current Stock:</b> %d units (%d%%)<br>
-<b>Status:</b> <span style="color: red;">CRITICAL - Immediate action required!</span><br>
-<br>
-<h3>📊 Analysis:</h3>
-%s<br>
-<br>
-<h3>🎯 Recommended Action:</h3>
-Order at least <b>%d units</b> immediately to avoid stockout.<br>
-<br>
-<i>This is an automated alert from your Supply Chain Management System</i>
-        ]], urgencyIcon, alertData.itemLabel, alertData.currentStock, alertData.percentage, 
+%s CRITICAL STOCK ALERT %s
+
+*Item:* %s
+*Current Stock:* %d units (%d%%)
+*Status:* CRITICAL - Immediate action required!
+
+--- 📊 Analysis ---
+%s
+
+--- 🎯 Recommended Action ---
+Order at least *%d units* immediately to avoid stockout.
+
+_This is an automated alert from your Supply Chain Management System_
+        ]], urgencyIcon, urgencyIcon,
+        alertData.itemLabel, alertData.currentStock, alertData.percentage,
         alertData.analysis or "Stock levels are critically low and require immediate attention.",
         alertData.recommendedOrder or 100)
         
     elseif alertData.level == "low" then
         urgencyIcon = "⚠️"
-        subject = string.format("%s Low Stock: %s at %d%%", urgencyIcon, alertData.itemLabel, alertData.percentage)
+        subject = string.format("%s Low Stock: %s at %d%%", 
+            urgencyIcon, alertData.itemLabel, alertData.percentage)
+        
         message = string.format([[
-<h2>%s Low Stock Warning</h2>
-<br>
-<b>Item:</b> %s<br>
-<b>Current Stock:</b> %d units (%d%%)<br>
-<b>Status:</b> <span style="color: orange;">LOW - Restock soon</span><br>
-<br>
-<h3>📊 Analysis:</h3>
-%s<br>
-<br>
-<h3>🎯 Recommended Action:</h3>
-Consider ordering <b>%d units</b> within the next 24 hours.<br>
-<br>
-<i>Supply Chain Management System</i>
-        ]], urgencyIcon, alertData.itemLabel, alertData.currentStock, alertData.percentage,
+%s LOW STOCK WARNING %s
+
+*Item:* %s
+*Current Stock:* %d units (%d%%)
+*Status:* LOW - Restock soon
+
+--- 📊 Analysis ---
+%s
+
+--- 🎯 Recommended Action ---
+Consider ordering *%d units* within the next 24 hours.
+
+_Supply Chain Management System_
+        ]], urgencyIcon, urgencyIcon,
+        alertData.itemLabel, alertData.currentStock, alertData.percentage,
         alertData.analysis or "Stock levels are running low based on current demand.",
         alertData.recommendedOrder or 75)
-        
-    else -- moderate
+    else
         urgencyIcon = "📊"
-        subject = string.format("%s Stock Update: %s at %d%%", urgencyIcon, alertData.itemLabel, alertData.percentage)
+        subject = string.format("%s Stock Update: %s at %d%%", 
+            urgencyIcon, alertData.itemLabel, alertData.percentage)
+        
         message = string.format([[
-<h2>%s Stock Level Update</h2>
-<br>
-<b>Item:</b> %s<br>
-<b>Current Stock:</b> %d units (%d%%)<br>
-<b>Status:</b> <span style="color: blue;">MODERATE - Monitor levels</span><br>
-<br>
-<h3>📊 Analysis:</h3>
-%s<br>
-<br>
-<i>Supply Chain Management System</i>
-        ]], urgencyIcon, alertData.itemLabel, alertData.currentStock, alertData.percentage,
+%s STOCK LEVEL UPDATE %s
+
+*Item:* %s
+*Current Stock:* %d units (%d%%)
+*Status:* MODERATE - Monitor levels
+
+--- 📊 Analysis ---
+%s
+
+_Supply Chain Management System_
+        ]], urgencyIcon, urgencyIcon,
+        alertData.itemLabel, alertData.currentStock, alertData.percentage,
         alertData.analysis or "Stock levels are moderate. Continue monitoring.")
     end
     
-    -- Send the email using unified function
-    local emailData = {
+    return sendEmailToPlayer(playerId, {
         sender = EmailConfig.stockAlerts.sender,
         subject = subject,
         message = message
-    }
-    
-    return sendEmailToPlayer(playerId, emailData)
+    })
 end
 
--- ===============================================
--- ORDER NOTIFICATION EMAILS
--- ===============================================
-
+-- Order Notification Emails
 function LBPhone.SendOrderNotification(playerId, orderData)
-    -- THIS FUNCTION NOW EXPECTS A PLAYER ID, NOT PHONE NUMBER
-    local playerId = phoneNumber -- Rename for clarity in future update
+    local subject = string.format("🚚 New Order: %s (%d boxes)", 
+        orderData.restaurantName, orderData.totalBoxes)
     
-    local subject = string.format("🚚 New Order: %s (%d boxes)", orderData.restaurantName, orderData.totalBoxes)
-    
-    -- Build order items list
+    -- Build items list
     local itemsList = ""
     for _, item in ipairs(orderData.items) do
-        itemsList = itemsList .. string.format("• %s x%d<br>", item.label, item.quantity)
+        itemsList = itemsList .. string.format("- %s x%d\n", item.label, item.quantity)
     end
     
     local message = string.format([[
-<h2>📦 New Supply Order Available</h2>
-<br>
-<b>Restaurant:</b> %s<br>
-<b>Total Boxes:</b> %d<br>
-<b>Base Pay:</b> $%d<br>
-<br>
-<h3>📋 Order Details:</h3>
+📦 NEW SUPPLY ORDER AVAILABLE 📦
+
+*Restaurant:* %s
+*Total Boxes:* %d
+*Base Pay:* $%d
+
+--- 📋 Order Details ---
 %s
-<br>
-<b>Delivery Location:</b> %s<br>
-<b>Distance:</b> %.1f miles<br>
-<br>
-<h3>💰 Potential Bonuses:</h3>
-• Speed Bonus: Up to %.0f%%<br>
-• Volume Bonus: $%d<br>
-• Perfect Delivery: +$%d<br>
-<br>
-<i>Head to the warehouse to accept this order!</i>
+*Delivery Location:* %s
+*Distance:* %.1f miles
+
+--- 💰 Potential Bonuses ---
+- Speed Bonus: Up to %.0f%%
+- Volume Bonus: $%d
+- Perfect Delivery: +$%d
+
+_Head to the warehouse to accept this order!_
     ]], orderData.restaurantName, orderData.totalBoxes, orderData.basePay,
     itemsList, orderData.location or "Restaurant District", orderData.distance or 0,
     orderData.maxSpeedBonus or 40, orderData.volumeBonus or 0, orderData.perfectBonus or 100)
     
-    local emailData = {
+    return sendEmailToPlayer(playerId, {
         sender = EmailConfig.orderNotifications.sender,
         subject = subject,
         message = message,
-        actions = {
-            {
-                label = "📍 Set Warehouse Waypoint",
-                data = {
-                    event = "supply:openWarehouseMenu",
-                    isServer = false,
-                    data = { action = "setWaypoint" }
-                }
-            }
-        }
-    }
-    
-    return sendEmailToPlayer(playerId, emailData)
+        actions = orderData.actions
+    })
 end
 
--- ===============================================
--- EMERGENCY ORDER EMAILS
--- ===============================================
-
+-- Emergency Order Emails
 function LBPhone.SendEmergencyOrderEmail(playerId, emergencyData)
-    -- THIS FUNCTION NOW EXPECTS A PLAYER ID, NOT PHONE NUMBER
-    local playerId = phoneNumber -- Rename for clarity in future update
-    
     local urgencyEmoji = emergencyData.priority == 3 and "🚨" or "🔥"
     local subject = string.format("%s EMERGENCY: %s needs %s NOW!", 
         urgencyEmoji, emergencyData.restaurantName, emergencyData.itemLabel)
     
     local message = string.format([[
-<h1 style="color: red;">%s EMERGENCY SUPPLY REQUEST</h1>
-<br>
-<b>Restaurant:</b> %s<br>
-<b>Critical Item:</b> %s<br>
-<b>Units Needed:</b> %d<br>
-<b>Current Stock:</b> <span style="color: red;">%d units</span><br>
-<br>
-<h2>⚡ URGENT DELIVERY REQUIRED</h2>
-<b>Time Limit:</b> %d minutes<br>
-<b>Base Pay:</b> <span style="color: green;">$%d</span><br>
-<b>Emergency Multiplier:</b> <span style="color: green;">%.1fx</span><br>
-<b>Speed Bonus:</b> Up to <span style="color: green;">+$%d</span><br>
-<b>Hero Bonus:</b> <span style="color: gold;">+$%d</span> for preventing stockout!<br>
-<br>
-<h3>💰 Total Potential Earnings: <span style="color: green;">$%d+</span></h3>
-<br>
-<b>⏰ RESPOND IMMEDIATELY!</b><br>
-<i>This restaurant will run out of stock without immediate assistance!</i>
-    ]], urgencyEmoji, emergencyData.restaurantName, emergencyData.itemLabel,
+%s EMERGENCY SUPPLY REQUEST %s
+
+*Restaurant:* %s
+*Critical Item:* %s
+*Units Needed:* %d
+*Current Stock:* %d units
+
+=== ⚡ URGENT DELIVERY REQUIRED ===
+*Time Limit:* %d minutes
+*Base Pay:* $%d
+*Emergency Multiplier:* %.1fx
+*Speed Bonus:* Up to +$%d
+*Hero Bonus:* +$%d for preventing stockout!
+
+💰 *Total Potential Earnings: $%d+*
+
+⏰ *RESPOND IMMEDIATELY!*
+_This restaurant will run out of stock without immediate assistance!_
+    ]], urgencyEmoji, urgencyEmoji,
+    emergencyData.restaurantName, emergencyData.itemLabel,
     emergencyData.unitsNeeded, emergencyData.currentStock,
     emergencyData.timeLimit or 30, emergencyData.basePay,
     emergencyData.multiplier, emergencyData.speedBonus,
     emergencyData.heroBonus, emergencyData.totalPotential)
     
-    local emailData = {
+    return sendEmailToPlayer(playerId, {
         sender = EmailConfig.emergencyAlerts.sender,
         subject = subject,
         message = message,
-        actions = {
-            {
-                label = "🚨 ACCEPT EMERGENCY",
-                data = {
-                    event = "supply:acceptEmergencyOrder",
-                    isServer = false,
-                    data = { orderId = emergencyData.orderId }
-                }
-            }
-        }
-    }
-    
-    return sendEmailToPlayer(playerId, emailData)
+        actions = emergencyData.actions
+    })
 end
 
--- ===============================================
--- DELIVERY COMPLETION EMAILS
--- ===============================================
-
+-- Delivery Completion Emails
 function LBPhone.SendDeliveryReceipt(playerId, deliveryData)
-    -- Get email address from phone number
-    local email = getEmailFromPhoneNumber(phoneNumber)
-    if not email then
-        print("[DELIVERY] Failed to get email for phone:", phoneNumber)
-        return false
-    end
-    
     local subject = string.format("✅ Delivery Complete - Earned $%d", deliveryData.totalPay)
     
     -- Build bonuses list
     local bonusList = ""
     if deliveryData.speedBonus > 0 then
-        bonusList = bonusList .. string.format("• Speed Bonus: +$%d (%.0f%%)<br>", 
-            deliveryData.speedBonus, deliveryData.speedMultiplier * 100 - 100)
+        bonusList = bonusList .. string.format("- Speed Bonus: +$%d (%.0f%%)\n", 
+            deliveryData.speedBonus, (deliveryData.speedMultiplier * 100) - 100)
     end
     if deliveryData.volumeBonus > 0 then
-        bonusList = bonusList .. string.format("• Volume Bonus: +$%d<br>", deliveryData.volumeBonus)
+        bonusList = bonusList .. string.format("- Volume Bonus: +$%d\n", deliveryData.volumeBonus)
     end
     if deliveryData.streakBonus > 0 then
-        bonusList = bonusList .. string.format("• Streak Bonus: +$%d (x%d streak)<br>", 
+        bonusList = bonusList .. string.format("- Streak Bonus: +$%d (x%d streak)\n", 
             deliveryData.streakBonus, deliveryData.currentStreak)
     end
     if deliveryData.perfectBonus > 0 then
-        bonusList = bonusList .. string.format("• Perfect Delivery: +$%d<br>", deliveryData.perfectBonus)
+        bonusList = bonusList .. string.format("- Perfect Delivery: +$%d\n", deliveryData.perfectBonus)
     end
     
     local message = string.format([[
-<h2>✅ Delivery Receipt</h2>
-<br>
-<b>Restaurant:</b> %s<br>
-<b>Boxes Delivered:</b> %d<br>
-<b>Delivery Time:</b> %s<br>
-<br>
-<h3>💰 Earnings Breakdown:</h3>
-<b>Base Pay:</b> $%d<br>
+✅ DELIVERY RECEIPT ✅
+
+*Restaurant:* %s
+*Boxes Delivered:* %d
+*Delivery Time:* %s
+
+--- 💰 Earnings Breakdown ---
+*Base Pay:* $%d
 %s
-<hr>
-<b>Total Earned:</b> <span style="color: green; font-size: 1.2em;">$%d</span><br>
-<br>
-<h3>📊 Performance Stats:</h3>
-• Current Streak: %d deliveries<br>
-• Daily Deliveries: %d<br>
-• Average Rating: %.1f%%<br>
-<br>
-<i>Great work! Keep up the excellent deliveries!</i>
+----------------------------------------
+*Total Earned:* $%d
+
+--- 📊 Performance Stats ---
+- Current Streak: %d deliveries
+- Daily Deliveries: %d
+- Average Rating: %.1f%%
+
+_Great work! Keep up the excellent deliveries!_
     ]], deliveryData.restaurantName, deliveryData.boxesDelivered,
     deliveryData.deliveryTime, deliveryData.basePay,
     bonusList, deliveryData.totalPay,
     deliveryData.currentStreak, deliveryData.dailyDeliveries,
     deliveryData.averageRating or 95.0)
     
-    local emailData = {
-        to = email,  -- FIXED: Using email address instead of phone number
+    return sendEmailToPlayer(playerId, {
         sender = EmailConfig.orderNotifications.sender,
         subject = subject,
         message = message
-    }
-    
-    local success = exports["lb-phone"]:SendMail(emailData)
-    
-    if success then
-        print(string.format("[DELIVERY] Email sent to %s (Phone: %s)", email, phoneNumber))
-    else
-        print(string.format("[DELIVERY] Failed to send email to %s", email))
-    end
-    
-    return success
-end
-
--- ===============================================
--- HELPER FUNCTION TO GET PHONE NUMBER
--- ===============================================
-
-function LBPhone.GetPlayerPhoneNumber(source)
-    -- This might vary based on your phone/framework setup
-    local xPlayer = QBCore.Functions.GetPlayer(source)
-    if xPlayer then
-        return xPlayer.PlayerData.charinfo.phone
-    end
-    return nil
-end
-
--- ===============================================
--- DUTY EMAIL FUNCTION (for sv_duty_emails.lua)
--- ===============================================
-
-function LBPhone.SendDutyEmail(playerId, emailData)
-    -- Get email address from phone number
-    local email = getEmailFromPhoneNumber(phoneNumber)
-    if not email then
-        print("[DUTY EMAIL] Failed to get email for phone:", phoneNumber, "Player:", playerId)
-        return false
-    end
-    
-    -- Send the email
-    local success = exports["lb-phone"]:SendMail({
-        to = email,
-        sender = emailData.sender or "warehouse@supply.chain",
-        subject = emailData.subject,
-        message = emailData.message
     })
-    
-    if success then
-        print(string.format("[DUTY EMAIL] Email sent to %s (phone: %s)", email, phoneNumber))
-    else
-        print(string.format("[DUTY EMAIL] Failed to send email to %s", email))
-    end
-    
-    return success
+end
+
+-- Duty Email Function
+function LBPhone.SendDutyEmail(playerId, emailData)
+    return sendEmailToPlayer(playerId, {
+        sender = emailData.sender or EmailConfig.dutyAlerts.sender,
+        subject = emailData.subject,
+        message = emailData.message,
+        actions = emailData.actions
+    })
 end
 
 -- ===============================================
--- TEST COMMAND
+-- EMAIL SETUP CHECK HANDLERS
+-- ===============================================
+
+-- Check if player has email set up
+RegisterNetEvent('supply:checkEmailSetup')
+AddEventHandler('supply:checkEmailSetup', function()
+    local src = source
+    local phoneNumber = getPlayerPhoneNumber(src)
+    local hasEmail = false
+    
+    if phoneNumber then
+        local email = getEmailFromPhoneNumber(phoneNumber)
+        hasEmail = email ~= nil
+    end
+    
+    -- Send response to client
+    TriggerClientEvent('supply:emailSetupStatus', src, hasEmail)
+    TriggerClientEvent('supply:emailSetupResponse', src, hasEmail) -- For export
+    
+    -- Log for debugging
+    if not hasEmail then
+        print(string.format("[LBPhone] Player %s (%s) needs to set up email", 
+            GetPlayerName(src), src))
+    end
+end)
+
+-- Also add this helper function to send email notifications to client
+local function notifyEmailReceived(playerId, emailType)
+    TriggerClientEvent('supply:emailReceived', playerId, emailType)
+end
+
+-- Update the main send functions to include client notification
+-- Example for SendDutyEmail (add similar to other functions):
+local originalSendDutyEmail = LBPhone.SendDutyEmail
+function LBPhone.SendDutyEmail(playerId, emailData)
+    local success, emailId = originalSendDutyEmail(playerId, emailData)
+    if success then
+        notifyEmailReceived(playerId, 'duty')
+    end
+    return success, emailId
+end
+
+-- ===============================================
+-- TEST COMMANDS
 -- ===============================================
 
 RegisterCommand('testlbphoneemail', function(source, args, rawCommand)
@@ -469,79 +473,65 @@ RegisterCommand('testlbphoneemail', function(source, args, rawCommand)
         return
     end
     
-    local xPlayer = QBCore.Functions.GetPlayer(source)
-    if not xPlayer then return end
-    
-    -- Get the actual phone number from lb-phone
-    local phoneNumber = getPlayerActualPhoneNumber(source)
-    local charInfoPhone = xPlayer.PlayerData.charinfo.phone
+    local phoneNumber = getPlayerPhoneNumber(source)
+    local email = phoneNumber and getEmailFromPhoneNumber(phoneNumber) or nil
     
     print("\n=== LB-PHONE EMAIL TEST ===")
     print("Player:", GetPlayerName(source))
-    print("CharInfo Phone:", charInfoPhone)
-    print("LB-Phone Equipped:", phoneNumber or "NONE")
-    
-    if not phoneNumber then
-        TriggerClientEvent('ox_lib:notify', source, {
-            title = 'Email Test Failed',
-            description = 'No equipped phone found!',
-            type = 'error',
-            duration = 5000,
-            position = Config.UI.notificationPosition
-        })
-        return
-    end
-    
-    local email = getEmailFromPhoneNumber(phoneNumber)
+    print("Phone Number:", phoneNumber or "NONE")
+    print("Email Address:", email or "NONE")
     
     if not email then
         TriggerClientEvent('ox_lib:notify', source, {
-            title = 'Email Test Failed',
-            description = 'No email address found for your phone',
+            title = '📧 Email Test Failed',
+            description = phoneNumber and 'No email address set up in phone' or 'No phone equipped',
             type = 'error',
-            duration = 5000,
-            position = Config.UI.notificationPosition
+            duration = 5000
         })
         return
     end
     
-    local success = exports["lb-phone"]:SendMail({
-        to = email,
+    -- Send test email
+    local success = sendEmailToPlayer(source, {
         sender = "test@supply.chain",
         subject = "📧 Email Integration Test",
         message = string.format([[
-<h2>✅ Email Test Successful!</h2>
-<br>
-Your email integration is working correctly.<br>
-<br>
-<b>CharInfo Phone:</b> %s<br>
-<b>Equipped Phone:</b> %s<br>
-<b>Email Address:</b> %s<br>
-<br>
+✅ EMAIL TEST SUCCESSFUL! ✅
+
+Your email integration is working correctly.
+
+*Phone Number:* %s
+*Email Address:* %s
+*Test Time:* %s
+
 All supply chain emails will be sent to this address.
-        ]], charInfoPhone, phoneNumber, email)
+
+--- Test Features ---
+- Plain text formatting ✅
+- Icon support 📱
+- Line breaks working
+- *Bold text* support
+- _Italic text_ support
+
+If you're seeing this message, everything is configured properly!
+        ]], phoneNumber, email, os.date("%H:%M:%S"))
     })
     
     if success then
         TriggerClientEvent('ox_lib:notify', source, {
-            title = 'Email Test Sent!',
+            title = '📧 Email Test Sent!',
             description = 'Check your phone email app',
             type = 'success',
-            duration = 5000,
-            position = Config.UI.notificationPosition
+            duration = 5000
         })
-        print(string.format("[EMAIL TEST] Successfully sent test email from phone %s to email %s", phoneNumber, email))
     else
         TriggerClientEvent('ox_lib:notify', source, {
-            title = 'Email Test Failed',
+            title = '📧 Email Test Failed',
             description = 'Failed to send test email',
             type = 'error',
-            duration = 5000,
-            position = Config.UI.notificationPosition
+            duration = 5000
         })
     end
-    
-    print("==========================\n")
 end, false)
 
 -- Export the module
