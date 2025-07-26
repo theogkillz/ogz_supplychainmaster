@@ -97,13 +97,16 @@ local function setupDeliveryVehicle(vehicle, vehicleModel)
     SetVehicleEngineOn(vehicle, true, true, false)
     
     -- Set fuel to full
-    if exports['LegacyFuel'] then
-        exports['LegacyFuel']:SetFuel(vehicle, 100.0)
+    if exports['lc_fuel'] then
+        exports["lc_fuel"]:SetFuel(vehicle, 100)
     end
     
     -- Add vehicle keys if using a key system
-    if exports['qb-vehiclekeys'] then
-        exports['qb-vehiclekeys']:GiveKeys(GetVehicleNumberPlateText(vehicle))
+    if exports['Renewed-Vehiclekeys'] then
+        exports['Renewed-Vehiclekeys']:addKey(plate)
+    else
+        -- Fallback to event if export doesn't exist
+        TriggerEvent("vehiclekeys:client:SetOwner", plate)
     end
     
     print("[ACHIEVEMENTS] Vehicle setup complete: " .. vehicleModel)

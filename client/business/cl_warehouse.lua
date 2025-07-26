@@ -199,6 +199,153 @@ AddEventHandler("warehouse:openProcessingMenu", function()
     lib.showContext("main_menu")
 end)
 
+-- Team Deliveries Submenu
+RegisterNetEvent("warehouse:openTeamMenu")
+AddEventHandler("warehouse:openTeamMenu", function()
+    local options = {
+        {
+            title = "🚛 Create Team Delivery",
+            description = "Start a new team delivery for large orders",
+            icon = "fas fa-plus-circle",
+            onSelect = function()
+                -- First, get pending orders to see which ones qualify for team delivery
+                TriggerServerEvent("warehouse:getPendingOrdersForTeam")
+            end
+        },
+        {
+            title = "👀 Browse Available Teams",
+            description = "See teams currently looking for drivers",
+            icon = "fas fa-search",
+            onSelect = function()
+                TriggerServerEvent("team:getAvailableTeams")
+            end
+        },
+        {
+            title = "🆔 Join Team by ID",
+            description = "Enter a specific team ID to join",
+            icon = "fas fa-keyboard",
+            onSelect = function()
+                local input = lib.inputDialog("Join Team", {
+                    { type = "input", label = "Team ID", placeholder = "Enter team ID", required = true }
+                })
+                if input and input[1] then
+                    TriggerServerEvent("team:joinDelivery", input[1])
+                end
+            end
+        },
+        {
+            title = "🏆 Team Leaderboards",
+            description = "View top performing delivery teams",
+            icon = "fas fa-trophy",
+            onSelect = function()
+                TriggerEvent("team:openLeaderboardMenu")
+            end
+        },
+        {
+            title = "📊 Team Performance Tips",
+            description = "Learn how to maximize team bonuses",
+            icon = "fas fa-info-circle",
+            onSelect = function()
+                TriggerEvent("team:showPerformanceTips")
+            end
+        },
+        {
+            title = "← Back to Main Menu",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openProcessingMenu")
+            end
+        }
+    }
+    
+    lib.registerContext({
+        id = "team_delivery_menu",
+        title = "👥 Team Delivery System",
+        options = options
+    })
+    lib.showContext("team_delivery_menu")
+end)
+
+-- Handler for team-eligible orders (shows only large orders)
+RegisterNetEvent("warehouse:showTeamOrderDetails")
+AddEventHandler("warehouse:showTeamOrderDetails", function(orders)
+    if not orders or #orders == 0 then
+        lib.notify({
+            title = "No Team Orders",
+            description = "No orders large enough for team delivery (5+ boxes required).",
+            type = "error",
+            duration = 10000,
+            position = Config.UI.notificationPosition,
+            markdown = Config.UI.enableMarkdown
+        })
+        return
+    end
+
+    local options = {}
+    local itemNames = exports.ox_inventory:Items()
+    
+    for _, orderGroup in ipairs(orders) do
+        local restaurantId = orderGroup.restaurantId
+        local restaurantData = Config.Restaurants[restaurantId]
+        local restaurantName = restaurantData and restaurantData.name or "Unknown Business"
+        
+        -- Calculate delivery info for this order
+        local boxesNeeded, containersNeeded, totalItems = calculateDeliveryBoxes({orderGroup})
+        
+        -- Only show orders with 5+ boxes (team eligible)
+        if boxesNeeded >= (Config.TeamDeliveries and Config.TeamDeliveries.minBoxesForTeam or 5) then
+            -- Create description with all items in the order
+            local itemList = {}
+            for _, item in ipairs(orderGroup.items) do
+                local itemLabel = itemNames[item.itemName:lower()] and itemNames[item.itemName:lower()].label or item.itemName
+                table.insert(itemList, item.quantity .. "x " .. itemLabel)
+            end
+            
+            table.insert(options, {
+                title = "🚛 Large Order: " .. orderGroup.orderGroupId,
+                description = string.format("📦 %d boxes (%d containers)\n🏪 %s\n📋 %s\n💰 $%d", 
+                    boxesNeeded,
+                    containersNeeded,
+                    restaurantName, 
+                    table.concat(itemList, ", "), 
+                    orderGroup.totalCost),
+                icon = "fas fa-truck",
+                onSelect = function()
+                    TriggerEvent("team:showDeliveryTypeMenu", orderGroup.orderGroupId, restaurantId, boxesNeeded)
+                end
+            })
+        end
+    end
+    
+    if #options == 0 then
+        lib.notify({
+            title = "No Team Orders",
+            description = "No orders large enough for team delivery (5+ boxes required).",
+            type = "info",
+            duration = 10000,
+            position = Config.UI.notificationPosition,
+            markdown = Config.UI.enableMarkdown
+        })
+        return
+    end
+    
+    -- Add back button
+    table.insert(options, {
+        title = "← Back to Team Menu",
+        icon = "fas fa-arrow-left",
+        onSelect = function()
+            TriggerEvent("warehouse:openTeamMenu")
+        end
+    })
+    
+    lib.registerContext({
+        id = "team_order_menu",
+        title = "🚛 Team-Eligible Orders",
+        options = options
+    })
+    lib.showContext("team_order_menu")
+end)
+
 -- Order Details
 RegisterNetEvent("warehouse:showOrderDetails")
 AddEventHandler("warehouse:showOrderDetails", function(orders)

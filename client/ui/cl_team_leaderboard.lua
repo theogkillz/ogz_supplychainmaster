@@ -5,6 +5,10 @@ RegisterNetEvent('team:showLeaderboard')
 AddEventHandler('team:showLeaderboard', function(teams, timeframe)
     local options = {}
     
+    -- SESSION 36 FIX: Ensure teams is a table
+    teams = teams or {}
+    timeframe = timeframe or "alltime"
+    
     -- Header
     local timeframeText = timeframe == "daily" and "Today's" or timeframe == "weekly" and "This Week's" or "All-Time"
     table.insert(options, {
@@ -22,42 +26,50 @@ AddEventHandler('team:showLeaderboard', function(teams, timeframe)
         })
     else
         for _, team in ipairs(teams) do
-            local description = ""
-            
-            if timeframe == "daily" then
-                description = string.format("📦 %d boxes | 🚚 %d deliveries | 📊 Avg: %d boxes/run", 
-                    team.score, team.deliveries, team.avgBoxes)
-            elseif timeframe == "weekly" then
-                description = string.format("📦 %d boxes | 🚚 %d deliveries | ⚡ %d perfect syncs", 
-                    team.score, team.deliveries, team.perfectSyncs)
-            else -- all-time
-                description = string.format("⚡ %d perfect syncs | 🚚 %d total | ⏱️ Best: %s", 
-                    team.score, team.deliveries, team.bestTime)
+            -- SESSION 36 FIX: Add nil checks for all team properties
+            if team then
+                local description = ""
+                
+                if timeframe == "daily" then
+                    description = string.format("📦 %d boxes | 🚚 %d deliveries | 📊 Avg: %d boxes/run", 
+                        team.score or 0, team.deliveries or 0, team.avgBoxes or 0)
+                elseif timeframe == "weekly" then
+                    description = string.format("📦 %d boxes | 🚚 %d deliveries | ⚡ %d perfect syncs", 
+                        team.score or 0, team.deliveries or 0, team.perfectSyncs or 0)
+                else -- all-time
+                    description = string.format("⚡ %d perfect syncs | 🚚 %d total | ⏱️ Best: %s", 
+                        team.score or 0, team.deliveries or 0, team.bestTime or "N/A")
+                end
+                
+                table.insert(options, {
+                    title = string.format("%s %s", team.rankEmoji or "#?", team.teamDisplay or "Unknown Team"),
+                    description = description,
+                    disabled = true
+                })
             end
-            
-            table.insert(options, {
-                title = string.format("%s %s", team.rankEmoji, team.teamDisplay),
-                description = description,
-                disabled = true
-            })
         end
     end
     
     -- Add challenges section for weekly
-    if timeframe == "weekly" and Config.TeamDeliveries.competitive.challenges then
+    if timeframe == "weekly" and Config.TeamDeliveries and Config.TeamDeliveries.competitive and Config.TeamDeliveries.competitive.challenges then
         table.insert(options, {
             title = "═══ Weekly Challenges ═══",
             disabled = true
         })
         
-        for _, challenge in ipairs(Config.TeamDeliveries.competitive.challenges.weekly) do
-            table.insert(options, {
-                title = string.format("🎯 %s", challenge.name),
-                description = string.format("Deliver %d boxes as a team | 💰 Reward: $%d", 
-                    challenge.boxes, challenge.reward),
-                icon = "fas fa-trophy",
-                disabled = true
-            })
+        local challenges = Config.TeamDeliveries.competitive.challenges.weekly
+        if challenges then
+            for _, challenge in ipairs(challenges) do
+                if challenge then
+                    table.insert(options, {
+                        title = string.format("🎯 %s", challenge.name or "Challenge"),
+                        description = string.format("Deliver %d boxes as a team | 💰 Reward: $%d", 
+                            challenge.boxes or 0, challenge.reward or 0),
+                        icon = "fas fa-trophy",
+                        disabled = true
+                    })
+                end
+            end
         end
     end
     
@@ -142,6 +154,12 @@ end)
 -- Performance tips display
 RegisterNetEvent('team:showPerformanceTips')
 AddEventHandler('team:showPerformanceTips', function()
+    -- SESSION 36 FIX: Safe config access
+    local maxBonus = 35 -- default
+    if Config.TeamDeliveries and Config.TeamDeliveries.teamBonuses and Config.TeamDeliveries.teamBonuses[6] then
+        maxBonus = (Config.TeamDeliveries.teamBonuses[6].multiplier - 1) * 100
+    end
+    
     local options = {
         {
             title = "⚡ Perfect Sync Strategy",
@@ -169,8 +187,7 @@ AddEventHandler('team:showPerformanceTips', function()
         },
         {
             title = "💰 Bonus Breakdown",
-            description = string.format("Team Size: Up to %.0f%%\nPerfect Sync: +$100/member\nWeekly Top 3: $1500-5000",
-                (Config.TeamDeliveries.teamBonuses[6].multiplier - 1) * 100),
+            description = string.format("Team Size: Up to %.0f%%\nPerfect Sync: +$100/member\nWeekly Top 3: $1500-5000", maxBonus),
             icon = "fas fa-coins",
             disabled = true
         },
@@ -194,13 +211,25 @@ end)
 -- Team rejoin prompt (for persistence)
 RegisterNetEvent('team:promptRejoinTeam')
 AddEventHandler('team:promptRejoinTeam', function(teamData)
+    -- SESSION 36 FIX: Add nil checks for teamData
+    if not teamData then
+        print("[TEAM_LEADERBOARD] Error: No team data provided to promptRejoinTeam")
+        return
+    end
+    
+    -- Ensure all required fields exist with defaults
+    local members = teamData.members or {}
+    local memberNames = #members > 0 and table.concat(members, ", ") or "Unknown team"
+    local deliveryCount = teamData.deliveryCount or 0
+    local onlineCount = teamData.onlineCount or 0
+    
     lib.alertDialog({
         header = "👥 Previous Team Available",
         content = string.format(
             "Your team is back online!\n\n**Members**: %s\n**Deliveries Together**: %d\n**Online Now**: %d members\n\nWould you like to rejoin?",
-            table.concat(teamData.members, ", "),
-            teamData.deliveryCount,
-            teamData.onlineCount
+            memberNames,
+            deliveryCount,
+            onlineCount
         ),
         centered = true,
         cancel = true,
@@ -210,7 +239,13 @@ AddEventHandler('team:promptRejoinTeam', function(teamData)
         }
     }, function(response)
         if response == "confirm" then
-            TriggerServerEvent("team:rejoinPersistentTeam", teamData.teamKey)
+            -- SESSION 36 FIX: Ensure teamKey exists
+            if teamData.teamKey then
+                TriggerServerEvent("team:rejoinPersistentTeam", teamData.teamKey)
+            else
+                print("[TEAM_LEADERBOARD] Error: No teamKey provided for rejoin")
+                TriggerServerEvent("warehouse:getPendingOrders")
+            end
         else
             TriggerServerEvent("warehouse:getPendingOrders")
         end

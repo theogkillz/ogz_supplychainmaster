@@ -150,7 +150,7 @@ end
 -- STOCK ALERT EMAILS
 -- ===============================================
 
-function LBPhone.SendStockAlert(phoneNumber, alertData)
+function LBPhone.SendStockAlert(playerId, alertData)
     -- THIS FUNCTION NOW EXPECTS A PLAYER ID, NOT PHONE NUMBER
     local playerId = phoneNumber -- Rename for clarity in future update
     
@@ -233,7 +233,7 @@ end
 -- ORDER NOTIFICATION EMAILS
 -- ===============================================
 
-function LBPhone.SendOrderNotification(phoneNumber, orderData)
+function LBPhone.SendOrderNotification(playerId, orderData)
     -- THIS FUNCTION NOW EXPECTS A PLAYER ID, NOT PHONE NUMBER
     local playerId = phoneNumber -- Rename for clarity in future update
     
@@ -291,7 +291,7 @@ end
 -- EMERGENCY ORDER EMAILS
 -- ===============================================
 
-function LBPhone.SendEmergencyOrderEmail(phoneNumber, emergencyData)
+function LBPhone.SendEmergencyOrderEmail(playerId, emergencyData)
     -- THIS FUNCTION NOW EXPECTS A PLAYER ID, NOT PHONE NUMBER
     local playerId = phoneNumber -- Rename for clarity in future update
     
@@ -347,7 +347,7 @@ end
 -- DELIVERY COMPLETION EMAILS
 -- ===============================================
 
-function LBPhone.SendDeliveryReceipt(phoneNumber, deliveryData)
+function LBPhone.SendDeliveryReceipt(playerId, deliveryData)
     -- Get email address from phone number
     local email = getEmailFromPhoneNumber(phoneNumber)
     if not email then
@@ -434,11 +434,11 @@ end
 -- DUTY EMAIL FUNCTION (for sv_duty_emails.lua)
 -- ===============================================
 
-function LBPhone.SendDutyEmail(phoneNumber, emailData)
+function LBPhone.SendDutyEmail(playerId, emailData)
     -- Get email address from phone number
     local email = getEmailFromPhoneNumber(phoneNumber)
     if not email then
-        print("[DUTY EMAIL] Failed to get email for phone:", phoneNumber)
+        print("[DUTY EMAIL] Failed to get email for phone:", phoneNumber, "Player:", playerId)
         return false
     end
     
@@ -451,7 +451,7 @@ function LBPhone.SendDutyEmail(phoneNumber, emailData)
     })
     
     if success then
-        print(string.format("[DUTY EMAIL] Email sent to %s", email))
+        print(string.format("[DUTY EMAIL] Email sent to %s (phone: %s)", email, phoneNumber))
     else
         print(string.format("[DUTY EMAIL] Failed to send email to %s", email))
     end

@@ -31,12 +31,14 @@ AddEventHandler("team:spawnAchievementVehicle", function(teamData, vehicleConfig
     end
 
     -- Spawn vehicle with queue offset to prevent collisions
-    local spawnOffset = teamData.memberRole == "leader" and 0 or (GetPlayerServerId(PlayerId()) % 5) * 3
+    local spawnPos = GetConvoySpawnPoint(1) -- Use warehouse 1
+    
+    -- Spawn vehicle at convoy position
     local van = CreateVehicle(vehicleModel, 
-        warehouseConfig.vehicle.position.x + spawnOffset, 
-        warehouseConfig.vehicle.position.y, 
-        warehouseConfig.vehicle.position.z, 
-        warehouseConfig.vehicle.position.w, 
+        spawnPos.x, 
+        spawnPos.y, 
+        spawnPos.z, 
+        spawnPos.w, 
         true, false)
     
     SetEntityAsMissionEntity(van, true, true)

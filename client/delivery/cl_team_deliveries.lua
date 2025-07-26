@@ -40,6 +40,51 @@ local function calculateDeliveryBoxes(orders)
     return boxesNeeded, containersNeeded, totalItems, itemsList
 end
 
+-- Helper function to get available convoy spawn point
+local function GetConvoySpawnPoint(warehouseId)
+    local warehouseConfig = Config.Warehouses[warehouseId or 1]
+    if not warehouseConfig or not warehouseConfig.convoySpawnPoints then
+        print("[CONVOY] Warning: No convoy spawn points configured for warehouse", warehouseId)
+        -- Fallback to default spawn with offset
+        return warehouseConfig.vehicle.position
+    end
+    
+    -- Find first available spawn point
+    for _, spawnPoint in ipairs(warehouseConfig.convoySpawnPoints) do
+        if not spawnPoint.occupied then
+            -- Mark as occupied
+            spawnPoint.occupied = true
+            
+            -- Set timeout to release after 5 minutes
+            SetTimeout(300000, function()
+                spawnPoint.occupied = false
+            end)
+            
+            return spawnPoint.position
+        end
+    end
+    
+    -- All spawn points occupied, use random offset from base position
+    print("[CONVOY] Warning: All convoy spawn points occupied, using random offset")
+    local basePos = warehouseConfig.vehicle.position
+    local randomOffset = math.random(-15, 15)
+    return vector4(
+        basePos.x + randomOffset,
+        basePos.y + randomOffset,
+        basePos.z,
+        basePos.w
+    )
+end
+
+-- Then UPDATE the existing team:spawnDeliveryVehicle event handler to use this function:
+-- Replace the spawn position logic (around line 280-320) with:
+
+    -- Get convoy-safe spawn position
+    local spawnPos = GetConvoySpawnPoint(1) -- Use warehouse 1
+    
+    -- Spawn vehicle at convoy position
+    local van = CreateVehicle(vehicleModel, spawnPos.x, spawnPos.y, spawnPos.z, spawnPos.w, true, false)
+
 -- Enhanced warehouse order details to include team option
 RegisterNetEvent("warehouse:showOrderDetails")
 AddEventHandler("warehouse:showOrderDetails", function(orders)
@@ -209,6 +254,8 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId)
             onSelect = function()
                 isReady = not isReady
                 TriggerServerEvent("team:setReady", teamId, isReady)
+                Citizen.Wait(100)
+                TriggerEvent("team:showRecruitmentMenu", teamId)
             end
         },
         {
@@ -457,57 +504,34 @@ AddEventHandler("team:spawnDeliveryVehicle", function(teamData)
         Citizen.Wait(100)
     end
 
-    -- Check spawn area is clear (SEQUENTIAL SPAWN SYSTEM)
-    local spawnPos = warehouseConfig.vehicle.position
-    local spawnClear = false
-    local attempts = 0
-    local spawnOffset = 0
+    -- Get convoy-safe spawn position
+    local spawnPos = GetConvoySpawnPoint(1) -- Use warehouse 1
     
-    while not spawnClear and attempts < 10 do
-        local nearbyVehicles = GetGamePool('CVehicle')
-        local tooClose = false
-        
-        local checkPos = vector3(
-            spawnPos.x + (spawnOffset * math.cos(math.rad(spawnPos.w))),
-            spawnPos.y + (spawnOffset * math.sin(math.rad(spawnPos.w))),
-            spawnPos.z
-        )
-        
-        for _, vehicle in ipairs(nearbyVehicles) do
-            local vehPos = GetEntityCoords(vehicle)
-            if #(vehPos - checkPos) < 5.0 then
-                tooClose = true
-                break
-            end
-        end
-        
-        if not tooClose then
-            spawnClear = true
-            spawnPos = vector4(checkPos.x, checkPos.y, checkPos.z, spawnPos.w)
-        else
-            spawnOffset = spawnOffset + 8  -- Move back 8 units each attempt
-            attempts = attempts + 1
-            Citizen.Wait(500)
+    -- Verify spawn area is clear (quick check)
+    local spawnClear = true
+    local nearbyVehicles = GetGamePool('CVehicle')
+    for _, vehicle in ipairs(nearbyVehicles) do
+        local vehPos = GetEntityCoords(vehicle)
+        if #(vehPos - vector3(spawnPos.x, spawnPos.y, spawnPos.z)) < 3.0 then
+            spawnClear = false
+            break
         end
     end
     
     if not spawnClear then
         lib.notify({
             title = "Spawn Blocked",
-            description = "Vehicle spawn area is blocked. Please wait...",
-            type = "error",
-            duration = 5000,
+            description = "Vehicle spawn area is blocked. Trying alternate position...",
+            type = "warning",
+            duration = 3000,
             position = Config.UI.notificationPosition,
             markdown = Config.UI.enableMarkdown
         })
-        -- Try again in a few seconds
-        Citizen.SetTimeout(3000, function()
-            TriggerEvent("team:spawnDeliveryVehicle", teamData)
-        end)
-        return
+        -- Get next available spawn point
+        spawnPos = GetConvoySpawnPoint(1)
     end
 
-    -- Spawn vehicle
+    -- Spawn vehicle at convoy position
     local van = CreateVehicle(vehicleModel, spawnPos.x, spawnPos.y, spawnPos.z, spawnPos.w, true, false)
     
     SetEntityAsMissionEntity(van, true, true)

@@ -551,3 +551,50 @@ AddEventHandler('delivery:requestPayment', function(deliveryData)
         isPerfect = deliveryData.deliveryTime < 1200
     })
 end)
+
+-- Get pending orders filtered for team delivery eligibility
+RegisterNetEvent("warehouse:getPendingOrdersForTeam")
+AddEventHandler("warehouse:getPendingOrdersForTeam", function()
+    local src = source
+    
+    -- Use the same query as regular orders but filter on client side
+    -- This maintains compatibility with existing system
+    MySQL.Async.fetchAll([[
+        SELECT 
+            o.order_group_id as orderGroupId,
+            o.restaurant_id as restaurantId,
+            o.status,
+            SUM(o.total_cost) as totalCost,
+            GROUP_CONCAT(CONCAT(o.ingredient, ':', o.quantity) SEPARATOR ',') as itemsConcat
+        FROM supply_orders o
+        WHERE o.status = 'pending'
+        GROUP BY o.order_group_id, o.restaurant_id
+        ORDER BY MIN(o.created_at) ASC
+    ]], {}, function(orderGroups)
+        if not orderGroups or #orderGroups == 0 then
+            TriggerClientEvent("warehouse:showTeamOrderDetails", src, {})
+            return
+        end
+        
+        -- Process the order groups
+        for _, orderGroup in ipairs(orderGroups) do
+            -- Parse concatenated items
+            orderGroup.items = {}
+            if orderGroup.itemsConcat then
+                for itemStr in string.gmatch(orderGroup.itemsConcat, "[^,]+") do
+                    local itemName, quantity = itemStr:match("([^:]+):(%d+)")
+                    if itemName and quantity then
+                        table.insert(orderGroup.items, {
+                            itemName = itemName,
+                            quantity = tonumber(quantity)
+                        })
+                    end
+                end
+            end
+            orderGroup.itemsConcat = nil
+        end
+        
+        -- Send all orders to client - client will filter for team eligibility
+        TriggerClientEvent("warehouse:showTeamOrderDetails", src, orderGroups)
+    end)
+end)

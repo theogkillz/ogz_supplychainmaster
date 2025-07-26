@@ -12,11 +12,7 @@ AddEventHandler('supply:forceJobReset', function()
     -- 1. CLEAR ALL UI ELEMENTS
     lib.hideTextUI()
     lib.hideContext()
-    
-    -- Clear any progress bars
-    if lib.progressActive then
-        lib.progressCancel()
-    end
+
     
     -- 2. CLEAR DELIVERY STATES
     

@@ -11,6 +11,12 @@ AddEventHandler("achievements:applyVehicleModsClient", function(vehicleNetId, ti
         Wait(100)
     end
     
+    -- SESSION 36 FIX: Add nil check for tierData
+    if not tierData then
+        print("[VEHICLE_ACHIEVEMENTS] Warning: No tier data received")
+        return
+    end
+    
     -- Apply performance mods based on tier
     if tierData.performanceMods then
         SetVehicleModKit(vehicle, 0)
