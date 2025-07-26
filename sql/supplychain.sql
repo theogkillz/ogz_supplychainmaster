@@ -500,54 +500,81 @@ ADD COLUMN `achievement_tier` varchar(50) DEFAULT 'rookie',
 ADD COLUMN `performance_bonus` decimal(10,2) DEFAULT 0.00;
 
 
--- ===============================================
--- INSERT DEFAULT MARKET SETTINGS (OPTIONAL)
--- ===============================================
+-- ===================================
+-- ADMIN SYSTEM TABLES
+-- ===================================
 
-INSERT IGNORE INTO `supply_market_settings` (`ingredient`, `max_stock`, `min_stock_threshold`, `base_price`, `category`) VALUES
-('reign_packed_groundchicken', 750, 50, 8.50, 'high_demand'),
-('reign_packed_groundmeat', 750, 50, 8.00, 'high_demand');
-('reign_packed_groundpork', 600, 40, 13.75, 'default'),
-('reign_rawchicken', 500, 35, 8.50, 'default'),
-('reign_rawbeef', 500, 35, 11.00, 'default'),
-('reign_rawpork', 400, 30, 9.25, 'default'),
-('reign_flour', 1000, 75, 3.50, 'high_demand'),
-('reign_milk', 800, 60, 4.25, 'high_demand'),
-('reign_cheese', 300, 25, 18.50, 'specialty'),
-('reign_lettuce', 400, 30, 2.75, 'default'),
-('reign_tomato', 400, 30, 3.25, 'default'),
-('reign_potato', 600, 45, 2.50, 'default');
+-- Admin action logs
+CREATE TABLE IF NOT EXISTS `supply_admin_logs` (
+    `id` INT(11) NOT NULL AUTO_INCREMENT,
+    `admin_id` VARCHAR(50) NOT NULL,
+    `admin_name` VARCHAR(100) DEFAULT NULL,
+    `action` VARCHAR(50) NOT NULL,
+    `details` TEXT DEFAULT NULL,
+    `timestamp` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    INDEX `idx_admin_id` (`admin_id`),
+    INDEX `idx_timestamp` (`timestamp`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- ===============================================
--- SAMPLE TEST DATA (OPTIONAL - UNCOMMENT IF NEEDED)
--- ===============================================
+-- Price overrides
+CREATE TABLE IF NOT EXISTS `supply_price_overrides` (
+    `id` INT(11) NOT NULL AUTO_INCREMENT,
+    `ingredient` VARCHAR(50) NOT NULL,
+    `override_price` DECIMAL(10,2) NOT NULL,
+    `override_until` DATETIME NOT NULL,
+    `created_by` INT(11) DEFAULT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `active` BOOLEAN DEFAULT TRUE,
+    PRIMARY KEY (`id`),
+    INDEX `idx_ingredient` (`ingredient`),
+    INDEX `idx_active` (`active`),
+    INDEX `idx_override_until` (`override_until`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Insert sample stock alerts for testing
-INSERT IGNORE INTO `supply_stock_alerts` (`ingredient`, `alert_level`, `current_stock`, `threshold_percentage`) VALUES
-('reign_packed_groundchicken', 'low', 45, 18.5),
-('reign_cheese', 'critical', 8, 4.2),
-('reign_flour', 'moderate', 230, 35.8);
+-- Market events log
+CREATE TABLE IF NOT EXISTS `supply_market_events` (
+    `id` INT(11) NOT NULL AUTO_INCREMENT,
+    `event_type` VARCHAR(50) NOT NULL,
+    `ingredients` TEXT DEFAULT NULL,
+    `multiplier` DECIMAL(4,2) DEFAULT 1.00,
+    `duration` INT(11) DEFAULT 3600,
+    `created_by` VARCHAR(50) DEFAULT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `expires_at` DATETIME NOT NULL,
+    `active` BOOLEAN DEFAULT TRUE,
+    PRIMARY KEY (`id`),
+    INDEX `idx_active` (`active`),
+    INDEX `idx_expires_at` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Insert sample market snapshot
-INSERT IGNORE INTO `supply_market_snapshots` (`ingredient`, `base_price`, `multiplier`, `final_price`, `stock_level`) VALUES
-('reign_packed_groundchicken', 12.50, 1.35, 16.88, 45),
-('reign_flour', 3.50, 0.95, 3.33, 230),
-('reign_cheese', 18.50, 2.10, 38.85, 8);
+-- System pause states
+CREATE TABLE IF NOT EXISTS `supply_system_states` (
+    `id` INT(11) NOT NULL AUTO_INCREMENT,
+    `state_name` VARCHAR(50) NOT NULL UNIQUE,
+    `state_value` VARCHAR(255) DEFAULT NULL,
+    `updated_by` VARCHAR(50) DEFAULT NULL,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `idx_state_name` (`state_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Add some initial warehouse stock
-INSERT IGNORE INTO `supply_warehouse_stock` (`ingredient`, `quantity`) VALUES
-('reign_packed_groundchicken', 245),
-('reign_packed_groundmeat', 278);
-('reign_flour', 230),
-('reign_cheese', 8),
-('reign_milk', 150),
-('reign_lettuce', 95),
-('reign_tomato', 82),
-('reign_potato', 180);
+-- Insert default system states
+INSERT INTO `supply_system_states` (`state_name`, `state_value`) VALUES
+('deliveries_paused', 'false'),
+('market_events_enabled', 'true'),
+('team_deliveries_enabled', 'true'),
+('emergency_orders_enabled', 'true')
+ON DUPLICATE KEY UPDATE state_name = state_name;
 
--- ===============================================
--- COMPLETION MESSAGE
--- ===============================================
+-- Add missing columns to existing tables if they don't exist
+-- For supply_orders table
+ALTER TABLE `supply_orders` 
+ADD COLUMN IF NOT EXISTS `paused_at` DATETIME DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS `admin_notes` TEXT DEFAULT NULL;
 
-SELECT 'Supply Chain Database Reset Complete!' as message,
-       (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'supply_%') as tables_created;
+-- For supply_player_stats table
+ALTER TABLE `supply_player_stats` 
+ADD COLUMN IF NOT EXISTS `admin_modified` BOOLEAN DEFAULT FALSE,
+ADD COLUMN IF NOT EXISTS `last_admin_action` VARCHAR(255) DEFAULT NULL;
+
