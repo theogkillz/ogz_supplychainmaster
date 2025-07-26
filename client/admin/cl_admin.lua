@@ -1,3 +1,5 @@
+local QBCore = exports['qb-core']:GetCoreObject()
+
 -- ===============================================
 -- CLIENT-SIDE JOB RESET FUNCTIONS
 -- ===============================================
@@ -290,20 +292,15 @@ AddEventHandler('admin:openJobResetMenu', function()
             description = "Reset your own supply chain job",
             icon = "fas fa-user-cog",
             onSelect = function()
-                lib.alertDialog({
+                local confirmed = lib.alertDialog({
                     header = "🔄 Reset Your Job",
                     content = "This will reset your supply chain job state. Continue?",
                     centered = true,
-                    cancel = true,
-                    labels = {
-                        confirm = "Reset My Job",
-                        cancel = "Cancel"
-                    }
-                }):next(function(confirmed)
-                    if confirmed then
-                        ExecuteCommand('supplyjobreset')
-                    end
-                end)
+                    cancel = true
+                })
+                if confirmed == 'confirm' then
+                    ExecuteCommand('supplyjobreset')
+                end
             end
         },
         {
@@ -315,20 +312,15 @@ AddEventHandler('admin:openJobResetMenu', function()
                     { type = "number", label = "Player ID", placeholder = "Enter player server ID", min = 1, required = true }
                 })
                 if input and input[1] then
-                    lib.alertDialog({
+                    local confirmed = lib.alertDialog({
                         header = "⚠️ Confirm Job Reset",
                         content = "This will reset the supply chain job for player ID: " .. input[1],
                         centered = true,
-                        cancel = true,
-                        labels = {
-                            confirm = "Reset Job",
-                            cancel = "Cancel"
-                        }
-                    }):next(function(confirmed)
-                        if confirmed then
-                            ExecuteCommand('supplyjobreset ' .. input[1])
-                        end
-                    end)
+                        cancel = true
+                    })
+                    if confirmed == 'confirm' then
+                        ExecuteCommand('supplyjobreset ' .. input[1])
+                    end
                 end
             end
         },
@@ -337,20 +329,15 @@ AddEventHandler('admin:openJobResetMenu', function()
             description = "Reset ALL online players (SUPERADMIN ONLY)",
             icon = "fas fa-users-cog",
             onSelect = function()
-                lib.alertDialog({
+                local confirmed = lib.alertDialog({
                     header = "⚠️ MASS RESET WARNING",
                     content = "This will reset the supply chain job for ALL online players. This action cannot be undone!",
                     centered = true,
-                    cancel = true,
-                    labels = {
-                        confirm = "MASS RESET",
-                        cancel = "Cancel"
-                    }
-                }):next(function(confirmed)
-                    if confirmed then
-                        ExecuteCommand('supplyjobmassreset')
-                    end
-                end)
+                    cancel = true
+                })
+                if confirmed == 'confirm' then
+                    ExecuteCommand('supplyjobmassreset')
+                end
             end
         },
         {
@@ -358,20 +345,15 @@ AddEventHandler('admin:openJobResetMenu', function()
             description = "Full system restart (SUPERADMIN ONLY)",
             icon = "fas fa-exclamation-triangle",
             onSelect = function()
-                lib.alertDialog({
+                local confirmed = lib.alertDialog({
                     header = "🚨 EMERGENCY RESTART WARNING",
                     content = "This will restart the entire supply chain system for all players. Use only if system is completely broken!",
                     centered = true,
-                    cancel = true,
-                    labels = {
-                        confirm = "EMERGENCY RESTART",
-                        cancel = "Cancel"
-                    }
-                }):next(function(confirmed)
-                    if confirmed then
-                        ExecuteCommand('supplyemergencyrestart')
-                    end
-                end)
+                    cancel = true
+                })
+                if confirmed == 'confirm' then
+                    ExecuteCommand('supplyemergencyrestart')
+                end
             end
         }
     }
@@ -402,7 +384,7 @@ AddEventHandler('admin:openMarketMenu', function()
             description = "View current market conditions",
             icon = "fas fa-chart-pie",
             onSelect = function()
-                TriggerServerEvent('market:getOverview')
+                TriggerServerEvent('admin:getMarketOverview')
             end
         },
         {
@@ -410,8 +392,24 @@ AddEventHandler('admin:openMarketMenu', function()
             description = "Trigger a shortage for specific ingredient",
             icon = "fas fa-exclamation-triangle",
             onSelect = function()
+                -- Get available ingredients from config
+                local ingredients = {}
+                if Config.Ingredients then
+                    for name, data in pairs(Config.Ingredients) do
+                        table.insert(ingredients, {
+                            value = name,
+                            label = data.label or name
+                        })
+                    end
+                end
+                
                 local input = lib.inputDialog("Create Shortage Event", {
-                    { type = "input", label = "Ingredient Name", placeholder = "e.g., reign_packed_groundchicken", required = true }
+                    { 
+                        type = "select", 
+                        label = "Select Ingredient", 
+                        options = ingredients,
+                        required = true 
+                    }
                 })
                 if input and input[1] then
                     ExecuteCommand('supply market event ' .. input[1] .. ' shortage')
@@ -423,8 +421,24 @@ AddEventHandler('admin:openMarketMenu', function()
             description = "Trigger a surplus for specific ingredient",
             icon = "fas fa-plus-circle",
             onSelect = function()
+                -- Get available ingredients from config
+                local ingredients = {}
+                if Config.Ingredients then
+                    for name, data in pairs(Config.Ingredients) do
+                        table.insert(ingredients, {
+                            value = name,
+                            label = data.label or name
+                        })
+                    end
+                end
+                
                 local input = lib.inputDialog("Create Surplus Event", {
-                    { type = "input", label = "Ingredient Name", placeholder = "e.g., reign_packed_groundchicken", required = true }
+                    { 
+                        type = "select", 
+                        label = "Select Ingredient", 
+                        options = ingredients,
+                        required = true 
+                    }
                 })
                 if input and input[1] then
                     ExecuteCommand('supply market event ' .. input[1] .. ' surplus')
@@ -436,20 +450,15 @@ AddEventHandler('admin:openMarketMenu', function()
             description = "Reset all prices to base values",
             icon = "fas fa-undo",
             onSelect = function()
-                lib.alertDialog({
+                local confirmed = lib.alertDialog({
                     header = "⚠️ Confirm Market Reset",
                     content = "This will reset ALL market prices to base values. This action cannot be undone.",
                     centered = true,
-                    cancel = true,
-                    labels = {
-                        confirm = "Reset Market",
-                        cancel = "Cancel"
-                    }
-                }):next(function(confirmed)
-                    if confirmed then
-                        ExecuteCommand('supply market reset')
-                    end
-                end)
+                    cancel = true
+                })
+                if confirmed == 'confirm' then
+                    ExecuteCommand('supply market reset')
+                end
             end
         },
         {
@@ -457,11 +466,27 @@ AddEventHandler('admin:openMarketMenu', function()
             description = "View historical pricing data",
             icon = "fas fa-history",
             onSelect = function()
+                -- Get available ingredients from config
+                local ingredients = {}
+                if Config.Ingredients then
+                    for name, data in pairs(Config.Ingredients) do
+                        table.insert(ingredients, {
+                            value = name,
+                            label = data.label or name
+                        })
+                    end
+                end
+                
                 local input = lib.inputDialog("View Price History", {
-                    { type = "input", label = "Ingredient Name", placeholder = "e.g., reign_packed_groundchicken", required = true }
+                    { 
+                        type = "select", 
+                        label = "Select Ingredient", 
+                        options = ingredients,
+                        required = true 
+                    }
                 })
                 if input and input[1] then
-                    TriggerServerEvent('market:getPriceHistory', input[1])
+                    TriggerServerEvent('admin:getPriceHistory', input[1])
                 end
             end
         }
@@ -493,7 +518,7 @@ AddEventHandler('admin:openStockMenu', function()
             description = "View all inventory levels",
             icon = "fas fa-chart-bar",
             onSelect = function()
-                TriggerServerEvent('stockalerts:getOverview')
+                TriggerServerEvent('admin:getStockOverview')
             end
         },
         {
@@ -501,7 +526,7 @@ AddEventHandler('admin:openStockMenu', function()
             description = "Show only critical stock situations",
             icon = "fas fa-exclamation-circle",
             onSelect = function()
-                TriggerServerEvent('stockalerts:getCriticalAlerts')
+                TriggerServerEvent('admin:getCriticalAlerts')
             end
         },
         {
@@ -509,15 +534,7 @@ AddEventHandler('admin:openStockMenu', function()
             description = "Analyze consumption patterns",
             icon = "fas fa-trending-up",
             onSelect = function()
-                TriggerServerEvent('stockalerts:getUsageTrends')
-            end
-        },
-        {
-            title = "🔮 AI Predictions",
-            description = "View predictive analytics",
-            icon = "fas fa-magic",
-            onSelect = function()
-                TriggerServerEvent('stockalerts:getSuggestions')
+                TriggerServerEvent('admin:getUsageTrends')
             end
         },
         {
@@ -525,8 +542,24 @@ AddEventHandler('admin:openStockMenu', function()
             description = "Manually adjust warehouse stock",
             icon = "fas fa-edit",
             onSelect = function()
+                -- Get available ingredients from config
+                local ingredients = {}
+                if Config.Ingredients then
+                    for name, data in pairs(Config.Ingredients) do
+                        table.insert(ingredients, {
+                            value = name,
+                            label = data.label or name
+                        })
+                    end
+                end
+                
                 local input = lib.inputDialog("Manual Stock Adjustment", {
-                    { type = "input", label = "Ingredient Name", placeholder = "e.g., reign_packed_groundchicken", required = true },
+                    { 
+                        type = "select", 
+                        label = "Select Ingredient", 
+                        options = ingredients,
+                        required = true 
+                    },
                     { type = "number", label = "New Quantity", placeholder = "Enter amount", min = 0, max = 9999, required = true }
                 })
                 if input and input[1] and input[2] then
@@ -562,7 +595,7 @@ AddEventHandler('admin:openDriverMenu', function()
             description = "View top performing drivers",
             icon = "fas fa-trophy",
             onSelect = function()
-                TriggerServerEvent('leaderboard:getDriverStats', 'all_time')
+                TriggerServerEvent('admin:getDriverLeaderboards')
             end
         },
         {
@@ -582,20 +615,15 @@ AddEventHandler('admin:openDriverMenu', function()
                     { type = "number", label = "Player ID", placeholder = "Enter player server ID", min = 1, required = true }
                 })
                 if input and input[1] then
-                    lib.alertDialog({
+                    local confirmed = lib.alertDialog({
                         header = "⚠️ Confirm Stats Reset",
                         content = "This will permanently delete all statistics for this player. This action cannot be undone.",
                         centered = true,
-                        cancel = true,
-                        labels = {
-                            confirm = "Reset Stats",
-                            cancel = "Cancel"
-                        }
-                    }):next(function(confirmed)
-                        if confirmed then
-                            ExecuteCommand('supply reset stats ' .. input[1])
-                        end
-                    end)
+                        cancel = true
+                    })
+                    if confirmed == 'confirm' then
+                        ExecuteCommand('supply reset stats ' .. input[1])
+                    end
                 end
             end
         },
@@ -604,9 +632,26 @@ AddEventHandler('admin:openDriverMenu', function()
             description = "Manually grant achievement to player",
             icon = "fas fa-medal",
             onSelect = function()
+                -- Get achievement options from config
+                local achievements = {
+                    { value = "rookie_runner", label = "Rookie Runner (10 deliveries)" },
+                    { value = "supply_specialist", label = "Supply Specialist (50 deliveries)" },
+                    { value = "logistics_expert", label = "Logistics Expert (250 deliveries)" },
+                    { value = "elite_transporter", label = "Elite Transporter (1000 deliveries)" },
+                    { value = "speed_demon", label = "Speed Demon (Fast deliveries)" },
+                    { value = "perfectionist", label = "Perfectionist (Perfect deliveries)" },
+                    { value = "team_player", label = "Team Player (Team deliveries)" },
+                    { value = "money_maker", label = "Money Maker (High earnings)" }
+                }
+                
                 local input = lib.inputDialog("Grant Achievement", {
                     { type = "number", label = "Player ID", placeholder = "Enter player server ID", min = 1, required = true },
-                    { type = "input", label = "Achievement ID", placeholder = "e.g., speed_demon", required = true }
+                    { 
+                        type = "select", 
+                        label = "Select Achievement", 
+                        options = achievements,
+                        required = true 
+                    }
                 })
                 if input and input[1] and input[2] then
                     TriggerServerEvent('admin:grantAchievement', tonumber(input[1]), input[2])
@@ -628,6 +673,28 @@ end)
 -- ===============================================
 RegisterNetEvent('admin:openEmergencyMenu')
 AddEventHandler('admin:openEmergencyMenu', function()
+    -- Get available ingredients from config
+    local ingredients = {}
+    if Config.Ingredients then
+        for name, data in pairs(Config.Ingredients) do
+            table.insert(ingredients, {
+                value = name,
+                label = data.label or name
+            })
+        end
+    end
+    
+    -- Get restaurant options
+    local restaurants = {}
+    if Config.Restaurants then
+        for id, data in pairs(Config.Restaurants) do
+            table.insert(restaurants, {
+                value = tostring(id),
+                label = data.label or ("Restaurant " .. id)
+            })
+        end
+    end
+    
     local options = {
         {
             title = "← Back to Admin Panel",
@@ -642,8 +709,18 @@ AddEventHandler('admin:openEmergencyMenu', function()
             icon = "fas fa-exclamation-triangle",
             onSelect = function()
                 local input = lib.inputDialog("Create Critical Emergency", {
-                    { type = "number", label = "Restaurant ID", placeholder = "Enter restaurant ID", min = 1, required = true },
-                    { type = "input", label = "Ingredient", placeholder = "e.g., reign_packed_groundchicken", required = true }
+                    { 
+                        type = "select", 
+                        label = "Select Restaurant", 
+                        options = restaurants,
+                        required = true 
+                    },
+                    { 
+                        type = "select", 
+                        label = "Select Ingredient", 
+                        options = ingredients,
+                        required = true 
+                    }
                 })
                 if input and input[1] and input[2] then
                     ExecuteCommand('supply emergency create ' .. input[1] .. ' ' .. input[2] .. ' critical')
@@ -656,8 +733,18 @@ AddEventHandler('admin:openEmergencyMenu', function()
             icon = "fas fa-exclamation",
             onSelect = function()
                 local input = lib.inputDialog("Create Urgent Emergency", {
-                    { type = "number", label = "Restaurant ID", placeholder = "Enter restaurant ID", min = 1, required = true },
-                    { type = "input", label = "Ingredient", placeholder = "e.g., reign_packed_groundchicken", required = true }
+                    { 
+                        type = "select", 
+                        label = "Select Restaurant", 
+                        options = restaurants,
+                        required = true 
+                    },
+                    { 
+                        type = "select", 
+                        label = "Select Ingredient", 
+                        options = ingredients,
+                        required = true 
+                    }
                 })
                 if input and input[1] and input[2] then
                     ExecuteCommand('supply emergency create ' .. input[1] .. ' ' .. input[2] .. ' urgent')
@@ -670,8 +757,18 @@ AddEventHandler('admin:openEmergencyMenu', function()
             icon = "fas fa-box",
             onSelect = function()
                 local input = lib.inputDialog("Create Standard Emergency", {
-                    { type = "number", label = "Restaurant ID", placeholder = "Enter restaurant ID", min = 1, required = true },
-                    { type = "input", label = "Ingredient", placeholder = "e.g., reign_packed_groundchicken", required = true }
+                    { 
+                        type = "select", 
+                        label = "Select Restaurant", 
+                        options = restaurants,
+                        required = true 
+                    },
+                    { 
+                        type = "select", 
+                        label = "Select Ingredient", 
+                        options = ingredients,
+                        required = true 
+                    }
                 })
                 if input and input[1] and input[2] then
                     ExecuteCommand('supply emergency create ' .. input[1] .. ' ' .. input[2] .. ' emergency')
@@ -683,20 +780,15 @@ AddEventHandler('admin:openEmergencyMenu', function()
             description = "Remove all active emergency orders",
             icon = "fas fa-trash",
             onSelect = function()
-                lib.alertDialog({
+                local confirmed = lib.alertDialog({
                     header = "⚠️ Clear All Emergency Orders",
                     content = "This will clear ALL active emergency orders. Are you sure?",
                     centered = true,
-                    cancel = true,
-                    labels = {
-                        confirm = "Clear All",
-                        cancel = "Cancel"
-                    }
-                }):next(function(confirmed)
-                    if confirmed then
-                        ExecuteCommand('supply emergency clear')
-                    end
-                end)
+                    cancel = true
+                })
+                if confirmed == 'confirm' then
+                    ExecuteCommand('supply emergency clear')
+                end
             end
         },
         {
@@ -704,7 +796,7 @@ AddEventHandler('admin:openEmergencyMenu', function()
             description = "See all current emergency orders",
             icon = "fas fa-list",
             onSelect = function()
-                TriggerServerEvent('emergency:getActiveOrders')
+                TriggerServerEvent('admin:getActiveEmergencies')
             end
         }
     }
@@ -735,20 +827,15 @@ AddEventHandler('admin:openSystemMenu', function()
             description = "Restart market and alert systems",
             icon = "fas fa-sync",
             onSelect = function()
-                lib.alertDialog({
+                local confirmed = lib.alertDialog({
                     header = "🔄 Reload Systems",
                     content = "This will restart the market pricing and stock alert systems. Continue?",
                     centered = true,
-                    cancel = true,
-                    labels = {
-                        confirm = "Reload",
-                        cancel = "Cancel"
-                    }
-                }):next(function(confirmed)
-                    if confirmed then
-                        ExecuteCommand('supply reload')
-                    end
-                end)
+                    cancel = true
+                })
+                if confirmed == 'confirm' then
+                    ExecuteCommand('supply reload')
+                end
             end
         },
         {
@@ -764,20 +851,15 @@ AddEventHandler('admin:openSystemMenu', function()
             description = "Clear all leaderboard data",
             icon = "fas fa-eraser",
             onSelect = function()
-                lib.alertDialog({
+                local confirmed = lib.alertDialog({
                     header = "⚠️ Reset Leaderboards",
                     content = "This will permanently delete ALL leaderboard data. This action cannot be undone.",
                     centered = true,
-                    cancel = true,
-                    labels = {
-                        confirm = "Reset All",
-                        cancel = "Cancel"
-                    }
-                }):next(function(confirmed)
-                    if confirmed then
-                        ExecuteCommand('supply reset leaderboard')
-                    end
-                end)
+                    cancel = true
+                })
+                if confirmed == 'confirm' then
+                    ExecuteCommand('supply reset leaderboard')
+                end
             end
         },
         {
@@ -785,20 +867,15 @@ AddEventHandler('admin:openSystemMenu', function()
             description = "Clear all market history and pricing",
             icon = "fas fa-chart-line",
             onSelect = function()
-                lib.alertDialog({
+                local confirmed = lib.alertDialog({
                     header = "⚠️ Reset Market Data",
                     content = "This will permanently delete ALL market history and reset prices. This action cannot be undone.",
                     centered = true,
-                    cancel = true,
-                    labels = {
-                        confirm = "Reset Market",
-                        cancel = "Cancel"
-                    }
-                }):next(function(confirmed)
-                    if confirmed then
-                        ExecuteCommand('supply reset market')
-                    end
-                end)
+                    cancel = true
+                })
+                if confirmed == 'confirm' then
+                    ExecuteCommand('supply reset market')
+                end
             end
         },
         {
@@ -880,6 +957,135 @@ AddEventHandler('admin:openAnalyticsMenu', function()
         options = options
     })
     lib.showContext("admin_analytics_menu")
+end)
+
+-- ===============================================
+-- RESULT DISPLAY HANDLERS
+-- ===============================================
+
+-- Display market overview
+RegisterNetEvent('admin:displayMarketOverview')
+AddEventHandler('admin:displayMarketOverview', function(data)
+    if not data then return end
+    
+    local message = "📈 **Market Overview**\n\n"
+    
+    for ingredient, info in pairs(data) do
+        message = message .. string.format(
+            "**%s**\n• Base: $%.2f\n• Current: $%.2f (%.1fx)\n• Stock: %d units\n• Trend: %s\n\n",
+            info.label or ingredient,
+            info.basePrice or 0,
+            info.currentPrice or 0,
+            info.multiplier or 1.0,
+            info.stock or 0,
+            info.trend or "stable"
+        )
+    end
+    
+    lib.notify({
+        title = '📊 Market Overview',
+        description = message,
+        type = 'info',
+        duration = 20000,
+        position = 'top',
+        markdown = true
+    })
+end)
+
+-- Display stock overview
+RegisterNetEvent('admin:displayStockOverview')
+AddEventHandler('admin:displayStockOverview', function(data)
+    if not data then return end
+    
+    local message = "📦 **Stock Overview**\n\n"
+    
+    for ingredient, info in pairs(data) do
+        local alertEmoji = info.critical and "🚨" or info.low and "⚠️" or "✅"
+        message = message .. string.format(
+            "%s **%s**\n• Warehouse: %d units\n• Restaurant Total: %d units\n• Daily Usage: %.1f units\n• Days Remaining: %.1f\n\n",
+            alertEmoji,
+            info.label or ingredient,
+            info.warehouseStock or 0,
+            info.restaurantStock or 0,
+            info.dailyUsage or 0,
+            info.daysRemaining or 999
+        )
+    end
+    
+    lib.notify({
+        title = '📦 Stock Overview',
+        description = message,
+        type = 'info',
+        duration = 20000,
+        position = 'top',
+        markdown = true
+    })
+end)
+
+-- Display driver analytics
+RegisterNetEvent('admin:displayDriverAnalytics')
+AddEventHandler('admin:displayDriverAnalytics', function(data)
+    if not data then return end
+    
+    local message = string.format(
+        "👥 **Driver Analytics**\n\n**Today's Performance:**\n• Active Drivers: %d\n• Total Deliveries: %d\n• Average Per Driver: %.1f\n• Total Revenue: $%s\n\n**All-Time Stats:**\n• Total Drivers: %d\n• Total Deliveries: %d\n• Perfect Deliveries: %d\n• Team Deliveries: %d",
+        data.todayActive or 0,
+        data.todayDeliveries or 0,
+        data.todayAverage or 0,
+        lib.math.groupdigits(data.todayRevenue or 0),
+        data.totalDrivers or 0,
+        data.totalDeliveries or 0,
+        data.perfectDeliveries or 0,
+        data.teamDeliveries or 0
+    )
+    
+    lib.notify({
+        title = '📊 Driver Analytics',
+        description = message,
+        type = 'info',
+        duration = 20000,
+        position = 'top',
+        markdown = true
+    })
+end)
+
+-- Display active emergencies
+RegisterNetEvent('admin:displayActiveEmergencies')
+AddEventHandler('admin:displayActiveEmergencies', function(data)
+    if not data or #data == 0 then
+        lib.notify({
+            title = '📋 Active Emergencies',
+            description = 'No active emergency orders.',
+            type = 'info',
+            duration = 5000
+        })
+        return
+    end
+    
+    local message = "🚨 **Active Emergency Orders**\n\n"
+    
+    for _, emergency in ipairs(data) do
+        local priorityEmoji = emergency.priority == "critical" and "🔴" or emergency.priority == "urgent" and "🟡" or "🟢"
+        message = message .. string.format(
+            "%s **%s** - %s\n• Restaurant: %s\n• Quantity: %d units\n• Bonus: %.1fx\n• Time Remaining: %d mins\n\n",
+            priorityEmoji,
+            emergency.priority:upper(),
+            emergency.ingredient,
+            emergency.restaurant,
+            emergency.quantity,
+            emergency.bonus,
+            emergency.timeRemaining
+        )
+    end
+    
+    lib.notify({
+        title = '🚛 Active Emergencies',
+        description = message,
+        type = 'info',
+        duration = 15000,
+        position = 'top',
+        markdown = true
+    })
 end)
 
 -- ===============================================
