@@ -196,15 +196,31 @@ CREATE TABLE IF NOT EXISTS `supply_team_members` (
     CONSTRAINT `fk_team_delivery` FOREIGN KEY (`team_delivery_id`) REFERENCES `supply_team_deliveries` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Add team delivery stats to player stats
-ALTER TABLE `supply_player_stats` 
-ADD COLUMN IF NOT EXISTS `team_deliveries` int(11) NOT NULL DEFAULT 0,
-ADD COLUMN IF NOT EXISTS `perfect_syncs` int(11) NOT NULL DEFAULT 0,
-ADD COLUMN IF NOT EXISTS `team_earnings` decimal(10,2) NOT NULL DEFAULT 0.00;
-
--- Indexes for performance
-CREATE INDEX IF NOT EXISTS `idx_team_weekly` ON `supply_team_deliveries` (`created_at`, `team_id`);
-CREATE INDEX IF NOT EXISTS `idx_member_stats` ON `supply_team_members` (`citizenid`, `role`);
+-- All player stats
+CREATE TABLE supply_player_stats (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    citizenid VARCHAR(50) UNIQUE NOT NULL,
+    experience INT DEFAULT 0,
+    level INT DEFAULT 1,
+    total_deliveries INT DEFAULT 0,
+    solo_deliveries INT DEFAULT 0,
+    team_deliveries INT DEFAULT 0,
+    perfect_deliveries INT DEFAULT 0,
+    perfect_syncs INT DEFAULT 0,
+    team_earnings DECIMAL(10,2) DEFAULT 0.00,
+    average_rating DECIMAL(3,2) DEFAULT 0.00,
+    total_earnings DECIMAL(10,2) DEFAULT 0.00,
+    last_activity TIMESTAMP NULL DEFAULT NULL,
+    -- Optional columns you might keep:
+    -- containers_used INT DEFAULT 0,
+    -- distance_traveled DECIMAL(10,2) DEFAULT 0.00,
+    
+    INDEX idx_citizenid (citizenid),
+    INDEX idx_level (level),
+    INDEX idx_experience (experience),
+    INDEX idx_total_deliveries (total_deliveries),
+    INDEX idx_last_activity (last_activity)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Stock Analytics and Alerts Database Tables
 

@@ -3,6 +3,11 @@ local QBCore = exports['qb-core']:GetCoreObject()
 -- Team delivery variables
 local currentTeam = nil
 local teamDeliveryData = nil
+local isReady = false
+
+-- Shared delivery tracking (same as solo)
+local deliveryBoxesRemaining = 0
+local totalDeliveryBoxes = 0
 
 -- Calculate delivery requirements
 local function calculateDeliveryBoxes(orders)
@@ -144,10 +149,15 @@ AddEventHandler("team:showDeliveryTypeMenu", function(orderGroupId, restaurantId
     
     if Config.TeamDeliveries and Config.TeamDeliveries.deliveryTypes then
         for typeId, deliveryType in pairs(Config.TeamDeliveries.deliveryTypes) do
-            if boxesNeeded >= deliveryType.minBoxes then
+            if boxesNeeded >= deliveryType.minBoxes and boxesNeeded <= deliveryType.maxBoxes then
                 table.insert(options, {
                     title = deliveryType.name,
-                    description = deliveryType.description .. "\nMinimum: " .. deliveryType.minBoxes .. " boxes",
+                    description = string.format("%s\n📦 %d boxes needed\n👥 %d-%d players required", 
+                        deliveryType.description, 
+                        boxesNeeded,
+                        deliveryType.requiredMembers, 
+                        deliveryType.maxMembers),
+                    icon = typeId == "duo" and "fas fa-user-friends" or typeId == "squad" and "fas fa-users" or "fas fa-truck",
                     onSelect = function()
                         TriggerServerEvent("team:createDelivery", orderGroupId, restaurantId, typeId)
                     end
@@ -413,7 +423,7 @@ AddEventHandler("team:updateReadyStatus", function(teamId, readyCount, totalMemb
     end
 end)
 
--- Spawn team delivery vehicle
+-- Spawn team delivery vehicle with sequential spawn check
 RegisterNetEvent("team:spawnDeliveryVehicle")
 AddEventHandler("team:spawnDeliveryVehicle", function(teamData)
     teamDeliveryData = teamData
@@ -431,8 +441,8 @@ AddEventHandler("team:spawnDeliveryVehicle", function(teamData)
         return
     end
 
-    DoScreenFadeOut(2500)
-    Citizen.Wait(2500)
+    -- NO SCREEN FADE (removed for immersion)
+    Citizen.Wait(1000)
 
     local playerPed = PlayerPedId()
     local vehicleModel = GetHashKey("speedo")
@@ -447,14 +457,58 @@ AddEventHandler("team:spawnDeliveryVehicle", function(teamData)
         Citizen.Wait(100)
     end
 
-    -- Spawn vehicle with slight offset for multiple team members
-    local spawnOffset = (teamData.memberRole == "leader") and 0 or math.random(-5, 5)
-    local van = CreateVehicle(vehicleModel, 
-        warehouseConfig.vehicle.position.x + spawnOffset, 
-        warehouseConfig.vehicle.position.y + spawnOffset, 
-        warehouseConfig.vehicle.position.z, 
-        warehouseConfig.vehicle.position.w, 
-        true, false)
+    -- Check spawn area is clear (SEQUENTIAL SPAWN SYSTEM)
+    local spawnPos = warehouseConfig.vehicle.position
+    local spawnClear = false
+    local attempts = 0
+    local spawnOffset = 0
+    
+    while not spawnClear and attempts < 10 do
+        local nearbyVehicles = GetGamePool('CVehicle')
+        local tooClose = false
+        
+        local checkPos = vector3(
+            spawnPos.x + (spawnOffset * math.cos(math.rad(spawnPos.w))),
+            spawnPos.y + (spawnOffset * math.sin(math.rad(spawnPos.w))),
+            spawnPos.z
+        )
+        
+        for _, vehicle in ipairs(nearbyVehicles) do
+            local vehPos = GetEntityCoords(vehicle)
+            if #(vehPos - checkPos) < 5.0 then
+                tooClose = true
+                break
+            end
+        end
+        
+        if not tooClose then
+            spawnClear = true
+            spawnPos = vector4(checkPos.x, checkPos.y, checkPos.z, spawnPos.w)
+        else
+            spawnOffset = spawnOffset + 8  -- Move back 8 units each attempt
+            attempts = attempts + 1
+            Citizen.Wait(500)
+        end
+    end
+    
+    if not spawnClear then
+        lib.notify({
+            title = "Spawn Blocked",
+            description = "Vehicle spawn area is blocked. Please wait...",
+            type = "error",
+            duration = 5000,
+            position = Config.UI.notificationPosition,
+            markdown = Config.UI.enableMarkdown
+        })
+        -- Try again in a few seconds
+        Citizen.SetTimeout(3000, function()
+            TriggerEvent("team:spawnDeliveryVehicle", teamData)
+        end)
+        return
+    end
+
+    -- Spawn vehicle
+    local van = CreateVehicle(vehicleModel, spawnPos.x, spawnPos.y, spawnPos.z, spawnPos.w, true, false)
     
     SetEntityAsMissionEntity(van, true, true)
     SetVehicleHasBeenOwnedByPlayer(van, true)
@@ -463,10 +517,26 @@ AddEventHandler("team:spawnDeliveryVehicle", function(teamData)
     SetVehicleEngineOn(van, true, true, false)
     SetEntityCleanupByEngine(van, false)
     
+    -- Apply achievement mods if enabled
+    if Config.AchievementVehicles and Config.AchievementVehicles.enabled then
+        TriggerServerEvent("achievements:applyVehicleMods", NetworkGetNetworkIdFromEntity(van))
+    end
+    
+    -- Give keys to the driver
     local vanPlate = GetVehicleNumberPlateText(van)
     TriggerEvent("vehiclekeys:client:SetOwner", vanPlate)
+    
+    -- For duo deliveries, give keys to both players
+    if teamData.isDuo then
+        TriggerServerEvent("team:shareVehicleKeys", teamData.teamId, vanPlate)
+    end
 
-    DoScreenFadeIn(2500)
+    -- Visual distinction for team vehicles
+    if teamData.memberRole == "leader" then
+        SetVehicleCustomPrimaryColour(van, 0, 255, 0)    -- Green for leader
+    else
+        SetVehicleCustomPrimaryColour(van, 0, 150, 255)  -- Blue for members
+    end
 
     lib.notify({
         title = "🚛 Team Vehicle Ready",
@@ -477,87 +547,93 @@ AddEventHandler("team:spawnDeliveryVehicle", function(teamData)
         markdown = Config.UI.enableMarkdown
     })
 
-    -- SetEntityCoords(playerPed, warehouseConfig.vehicle.position.x + 2.0, warehouseConfig.vehicle.position.y, warehouseConfig.vehicle.position.z, false, false, false, true)
+    -- NO TELEPORT (removed for immersion)
     
-    -- Use team-specific loading system
-    TriggerEvent("team:loadTeamBoxes", warehouseConfig, van, teamData)
+    -- Use enhanced team pallet loading system
+    TriggerEvent("team:loadTeamBoxesPallet", warehouseConfig, van, teamData)
+    
+    -- Notify server that spawn is complete
+    TriggerServerEvent("team:vehicleSpawnComplete", teamData.teamId)
 end)
 
--- Team box loading system
-RegisterNetEvent("team:loadTeamBoxes")
-AddEventHandler("team:loadTeamBoxes", function(warehouseConfig, van, teamData)
+-- Enhanced Team Pallet Loading System (matching solo system)
+RegisterNetEvent("team:loadTeamBoxesPallet")
+AddEventHandler("team:loadTeamBoxesPallet", function(warehouseConfig, van, teamData)
     local playerPed = PlayerPedId()
     local boxesLoaded = 0
     local maxBoxes = teamData.boxesAssigned
     local hasBox = false
     local boxProp = nil
-    local boxBlips = {}
-    local boxEntities = {}
+    local palletBlip = nil
+    local palletEntity = nil
     local targetZones = {}
-    local vanTargetName = "team_van_load"
+    local vanTargetName = "team_van_load_" .. tostring(van)
+    local palletZoneName = "team_pallet_pickup_" .. tostring(GetGameTimer())
 
-    local propName = Config.CarryBoxProp
-    local model = GetHashKey(propName)
-    RequestModel(model)
-    while not HasModelLoaded(model) do
+    -- Load both props
+    local boxModel = GetHashKey(Config.DeliveryProps.boxProp)
+    local palletModel = GetHashKey(Config.DeliveryProps.palletProp)
+    
+    RequestModel(boxModel)
+    RequestModel(palletModel)
+    while not HasModelLoaded(boxModel) or not HasModelLoaded(palletModel) do
         Citizen.Wait(100)
     end
 
     local boxPositions = warehouseConfig.boxPositions
     if not boxPositions or #boxPositions == 0 then
+        print("[ERROR] No boxPositions defined")
         return
     end
 
-    -- Create boxes for this team member's portion
-    for i = 1, maxBoxes do
-        local pos = boxPositions[1]
+    -- Create SHARED pallet prop (spread out positions to avoid collisions)
+    local palletOffset = (teamData.memberRole == "leader") and 0 or 10  -- Leaders at base, members offset
+    local palletPos = vector3(
+        boxPositions[1].x + palletOffset,
+        boxPositions[1].y + math.random(-3, 3), -- Small random offset
+        boxPositions[1].z
+    )
+    
+    palletEntity = CreateObject(palletModel, palletPos.x, palletPos.y, palletPos.z, true, true, true)
+    if DoesEntityExist(palletEntity) then
+        PlaceObjectOnGroundProperly(palletEntity)
         
-        -- Offset boxes for team members
-        if teamData.memberRole ~= "leader" then
-            pos = vector3(boxPositions[1].x + (i * 2), boxPositions[1].y + math.random(-2, 2), boxPositions[1].z)
-        else
-            pos = vector3(boxPositions[1].x + (i * 2), boxPositions[1].y, boxPositions[1].z)
-        end
-        
-        local box = CreateObject(model, pos.x, pos.y, pos.z, true, true, true)
-        if DoesEntityExist(box) then
-            PlaceObjectOnGroundProperly(box)
-            table.insert(boxEntities, { entity = box, position = pos, loaded = false })
-            
-            -- Team-colored light effects
-            Citizen.CreateThread(function()
-                while DoesEntityExist(box) do
-                    local lightColor = teamData.memberRole == "leader" and {r = 0, g = 255, b = 0} or {r = 0, g = 150, b = 255}
-                    DrawLightWithRange(pos.x, pos.y, pos.z + 0.5, lightColor.r, lightColor.g, lightColor.b, 2.0, 1.0)
-                    Citizen.Wait(0)
-                end
-            end)
-        end
+        -- Team-colored light effect
+        Citizen.CreateThread(function()
+            while DoesEntityExist(palletEntity) and boxesLoaded < maxBoxes do
+                local lightColor = teamData.memberRole == "leader" and {r = 0, g = 255, b = 0} or {r = 0, g = 150, b = 255}
+                DrawLightWithRange(palletPos.x, palletPos.y, palletPos.z + 1.0, 
+                    lightColor.r, lightColor.g, lightColor.b, 3.0, 1.5)
+                Citizen.Wait(0)
+            end
+        end)
+    end
 
-        -- Create blip
-        local blip = AddBlipForCoord(pos.x, pos.y, pos.z)
-        SetBlipSprite(blip, 1)
-        SetBlipDisplay(blip, 4)
-        SetBlipScale(blip, 0.7)
-        SetBlipColour(blip, teamData.memberRole == "leader" and 2 or 3)
-        SetBlipAsShortRange(blip, true)
-        BeginTextCommandSetBlipName("STRING")
-        AddTextComponentString("Team Box " .. i .. "/" .. maxBoxes)
-        EndTextCommandSetBlipName(blip)
-        table.insert(boxBlips, blip)
+    -- Create blip for pallet
+    palletBlip = AddBlipForCoord(palletPos.x, palletPos.y, palletPos.z)
+    SetBlipSprite(palletBlip, 1)
+    SetBlipDisplay(palletBlip, 4)
+    SetBlipScale(palletBlip, 0.8)
+    SetBlipColour(palletBlip, teamData.memberRole == "leader" and 2 or 3)
+    SetBlipAsShortRange(palletBlip, true)
+    BeginTextCommandSetBlipName("STRING")
+    AddTextComponentString(string.format("Team Pallet (%d boxes)", maxBoxes))
+    EndTextCommandSetBlipName(palletBlip)
 
-        -- Create target zone
-        local zoneName = "team_box_pickup_" .. i
+    -- Helper function to update pallet zone
+    local function updatePalletZone()
+        exports.ox_target:removeZone(palletZoneName)
         exports.ox_target:addBoxZone({
-            coords = vector3(pos.x, pos.y, pos.z),
-            size = vector3(2.0, 2.0, 2.0),
+            coords = vector3(palletPos.x, palletPos.y, palletPos.z),
+            size = vector3(3.0, 3.0, 2.0),
             rotation = 0,
             debug = false,
-            name = zoneName,
+            name = palletZoneName,
             options = {
                 {
-                    label = "Pick Up Team Box " .. i .. "/" .. maxBoxes,
+                    label = string.format("Grab Box (%d/%d loaded)", boxesLoaded, maxBoxes),
                     icon = "fas fa-box",
+                    disabled = hasBox or boxesLoaded >= maxBoxes,
                     onSelect = function()
                         if hasBox then
                             lib.notify({
@@ -571,18 +647,28 @@ AddEventHandler("team:loadTeamBoxes", function(warehouseConfig, van, teamData)
                             return
                         end
                         
+                        if boxesLoaded == 0 and teamData.memberRole == "leader" then
+                            lib.notify({
+                                title = "📦 Team Loading Phase",
+                                description = string.format("Load %d boxes. Your team is counting on you!", maxBoxes),
+                                type = "info",
+                                duration = 10000,
+                                position = Config.UI.notificationPosition,
+                                markdown = Config.UI.enableMarkdown
+                            })
+                        end
+                        
                         if lib.progressBar({
-                            duration = 3000,
+                            duration = 2500,
                             position = "bottom",
-                            label = "Picking Up Team Box " .. i .. "/" .. maxBoxes .. "...",
+                            label = "Grabbing box from pallet...",
                             canCancel = false,
                             disable = { move = true, car = true, combat = true, sprint = true },
                             anim = { dict = "mini@repair", clip = "fixing_a_ped" }
                         }) then
-                            DeleteObject(box)
-                            
+                            -- Create box in player's hands
                             local playerCoords = GetEntityCoords(playerPed)
-                            boxProp = CreateObject(model, playerCoords.x, playerCoords.y, playerCoords.z, true, true, true)
+                            boxProp = CreateObject(boxModel, playerCoords.x, playerCoords.y, playerCoords.z, true, true, true)
                             AttachEntityToEntity(boxProp, playerPed, GetPedBoneIndex(playerPed, 60309),
                                 0.1, 0.2, 0.25, -90.0, 0.0, 0.0, true, true, false, true, 1, true)
 
@@ -594,26 +680,19 @@ AddEventHandler("team:loadTeamBoxes", function(warehouseConfig, van, teamData)
                             end
                             TaskPlayAnim(playerPed, animDict, "idle", 8.0, -8.0, -1, 50, 0, false, false, false)
 
-                            lib.notify({
-                                title = "Team Box " .. i .. " Picked Up",
-                                description = "Load into your team vehicle (" .. (boxesLoaded + 1) .. "/" .. maxBoxes .. ")",
-                                type = "success",
-                                duration = 5000,
-                                position = Config.UI.notificationPosition,
-                                markdown = Config.UI.enableMarkdown
-                            })
-                            
-                            exports.ox_target:removeZone(zoneName)
                         end
                     end
                 }
             }
         })
-        table.insert(targetZones, zoneName)
     end
 
-    -- Team van loading system
-    local function updateTeamVanTargetZone()
+    -- Initial pallet zone setup
+    updatePalletZone()
+    table.insert(targetZones, palletZoneName)
+
+    -- Van loading with progress tracking
+    local function updateVanTargetZone()
         while DoesEntityExist(van) and boxesLoaded < maxBoxes do
             local vanPos = GetEntityCoords(van)
             local vanHeading = GetEntityHeading(van)
@@ -632,13 +711,13 @@ AddEventHandler("team:loadTeamBoxes", function(warehouseConfig, van, teamData)
                 name = vanTargetName,
                 options = {
                     {
-                        label = "Load Team Box (" .. (boxesLoaded + 1) .. "/" .. maxBoxes .. ")",
+                        label = string.format("Load Box (%d/%d)", boxesLoaded + 1, maxBoxes),
                         icon = "fas fa-truck-loading",
                         onSelect = function()
                             if not hasBox then
                                 lib.notify({
                                     title = "Error",
-                                    description = "You need to pick up a box first.",
+                                    description = "You need to grab a box from the pallet first.",
                                     type = "error",
                                     duration = 5000,
                                     position = Config.UI.notificationPosition,
@@ -648,9 +727,9 @@ AddEventHandler("team:loadTeamBoxes", function(warehouseConfig, van, teamData)
                             end
                             
                             if lib.progressBar({
-                                duration = 4000,
+                                duration = 3000,
                                 position = "bottom",
-                                label = "Loading Team Box " .. (boxesLoaded + 1) .. "/" .. maxBoxes .. "...",
+                                label = string.format("Loading box %d/%d...", boxesLoaded + 1, maxBoxes),
                                 canCancel = false,
                                 disable = { move = true, car = true, combat = true, sprint = true },
                                 anim = { dict = "mini@repair", clip = "fixing_a_ped" }
@@ -663,10 +742,13 @@ AddEventHandler("team:loadTeamBoxes", function(warehouseConfig, van, teamData)
                                 boxesLoaded = boxesLoaded + 1
                                 ClearPedTasks(playerPed)
                                 
+                                -- Update pallet zone
+                                updatePalletZone()
+                                
                                 if boxesLoaded >= maxBoxes then
-                                    -- All team boxes loaded!
+                                    -- All boxes loaded!
                                     lib.notify({
-                                        title = "🎉 Team Boxes Loaded!",
+                                        title = "✅ Loading Complete",
                                         description = string.format("All %d boxes loaded! Coordinate with your team for delivery!", maxBoxes),
                                         type = "success",
                                         duration = 10000,
@@ -675,25 +757,20 @@ AddEventHandler("team:loadTeamBoxes", function(warehouseConfig, van, teamData)
                                     })
                                     
                                     -- Clean up
-                                    for _, blip in ipairs(boxBlips) do
-                                        RemoveBlip(blip)
-                                    end
+                                    if palletBlip then RemoveBlip(palletBlip) end
+                                    if DoesEntityExist(palletEntity) then DeleteObject(palletEntity) end
+                                    
                                     for _, zone in ipairs(targetZones) do
                                         exports.ox_target:removeZone(zone)
                                     end
                                     exports.ox_target:removeZone(vanTargetName)
-                                    for _, boxData in ipairs(boxEntities) do
-                                        if DoesEntityExist(boxData.entity) then
-                                            DeleteObject(boxData.entity)
-                                        end
-                                    end
                                     
                                     -- Start team delivery coordination
                                     TriggerEvent("team:startCoordinatedDelivery", teamData.restaurantId, van, teamData)
                                 else
                                     lib.notify({
-                                        title = "Team Box " .. boxesLoaded .. " Loaded",
-                                        description = (maxBoxes - boxesLoaded) .. " boxes remaining for your vehicle",
+                                        title = "Box Loaded",
+                                        description = string.format("%d boxes remaining", maxBoxes - boxesLoaded),
                                         type = "success",
                                         duration = 5000,
                                         position = Config.UI.notificationPosition,
@@ -709,11 +786,13 @@ AddEventHandler("team:loadTeamBoxes", function(warehouseConfig, van, teamData)
         end
     end
 
-    Citizen.CreateThread(updateTeamVanTargetZone)
+    Citizen.CreateThread(updateVanTargetZone)
 
     lib.notify({
         title = "🚛 Team Loading Phase",
-        description = string.format("Load %d boxes for your part of the team delivery!", maxBoxes),
+        description = string.format("Role: %s | Load %d boxes from shared pallet", 
+            teamData.memberRole == "leader" and "Team Leader" or "Team Member", 
+            maxBoxes),
         type = "info",
         duration = 15000,
         position = Config.UI.notificationPosition,
@@ -725,6 +804,10 @@ end)
 RegisterNetEvent("team:startCoordinatedDelivery")
 AddEventHandler("team:startCoordinatedDelivery", function(restaurantId, van, teamData)
     local deliveryStartTime = GetGameTimer()
+    
+    -- Set tracking variables
+    deliveryBoxesRemaining = teamData.boxesAssigned
+    totalDeliveryBoxes = teamData.boxesAssigned
     
     lib.alertDialog({
         header = "🚛 Team Delivery Active",
@@ -755,7 +838,7 @@ AddEventHandler("team:startCoordinatedDelivery", function(restaurantId, van, tea
         markdown = Config.UI.enableMarkdown
     })
 
-    -- Complete team delivery when arrived
+    -- Monitor arrival at delivery location
     Citizen.CreateThread(function()
         local isTextUIShown = false
         while DoesEntityExist(van) do
@@ -765,7 +848,7 @@ AddEventHandler("team:startCoordinatedDelivery", function(restaurantId, van, tea
             
             if distance < 10.0 and IsPedInVehicle(playerPed, van, false) then
                 if not isTextUIShown then
-                    lib.showTextUI("[E] Complete Team Delivery", {
+                    lib.showTextUI("[E] Park Van & Start Team Delivery", {
                         icon = "fas fa-users"
                     })
                     isTextUIShown = true
@@ -775,22 +858,14 @@ AddEventHandler("team:startCoordinatedDelivery", function(restaurantId, van, tea
                         lib.hideTextUI()
                         isTextUIShown = false
                         
-                        local deliveryEndTime = GetGameTimer()
-                        local totalDeliveryTime = math.floor((deliveryEndTime - deliveryStartTime) / 1000)
+                        -- Store delivery time for coordination bonus
+                        teamData.arrivalTime = GetGameTimer()
+                        teamData.deliveryTime = math.floor((teamData.arrivalTime - deliveryStartTime) / 1000)
                         
                         RemoveBlip(blip)
-                        DeleteVehicle(van)
                         
-                        lib.notify({
-                            title = "🎉 Team Member Complete!",
-                            description = "Waiting for other team members to finish...",
-                            type = "success",
-                            duration = 8000,
-                            position = Config.UI.notificationPosition,
-                            markdown = Config.UI.enableMarkdown
-                        })
-                        
-                        TriggerServerEvent("team:completeMemberDelivery", teamData.teamId, totalDeliveryTime)
+                        -- Start team delivery process (same as solo)
+                        TriggerEvent("team:setupDeliveryZone", restaurantId, van, teamData)
                         break
                     end
                 end
@@ -807,4 +882,263 @@ AddEventHandler("team:startCoordinatedDelivery", function(restaurantId, van, tea
         end
         RemoveBlip(blip)
     end)
+end)
+
+-- Setup team delivery zone (matches solo system)
+RegisterNetEvent("team:setupDeliveryZone")
+AddEventHandler("team:setupDeliveryZone", function(restaurantId, van, teamData)
+    local deliverBoxPosition = Config.Restaurants[restaurantId] and Config.Restaurants[restaurantId].deliveryBox
+    if not deliverBoxPosition then
+        deliverBoxPosition = vector3(-1177.39, -890.98, 12.79) -- Fallback
+    end
+
+    -- Start the delivery loop (same as solo)
+    TriggerEvent("team:startDeliveryLoop", restaurantId, van, teamData, deliverBoxPosition)
+end)
+
+-- Team delivery loop (one by one, any member can deliver)
+RegisterNetEvent("team:startDeliveryLoop")
+AddEventHandler("team:startDeliveryLoop", function(restaurantId, van, teamData, deliverBoxPosition)
+    if deliveryBoxesRemaining == totalDeliveryBoxes then
+        lib.notify({
+            title = "📦 Team Delivery Instructions", 
+            description = string.format("Any team member can deliver! Take %d boxes to business door", totalDeliveryBoxes),
+            type = "info",
+            duration = 10000,
+            position = Config.UI.notificationPosition,
+            markdown = Config.UI.enableMarkdown
+        })
+    end
+    
+    -- Start with grabbing box from van
+    TriggerEvent("team:grabBoxFromVan", restaurantId, van, teamData, deliverBoxPosition)
+end)
+
+-- Team grab box from van (same mechanics as solo)
+RegisterNetEvent("team:grabBoxFromVan")
+AddEventHandler("team:grabBoxFromVan", function(restaurantId, van, teamData, deliverBoxPosition)
+    if not DoesEntityExist(van) then
+        lib.notify({
+            title = "Error",
+            description = "Delivery van not found.",
+            type = "error",
+            duration = 10000,
+            position = Config.UI.notificationPosition,
+            markdown = Config.UI.enableMarkdown
+        })
+        return
+    end
+
+    local playerPed = PlayerPedId()
+    local hasBox = false
+    local boxProp = nil
+    local vanTargetName = "team_van_grab_" .. tostring(van)
+    local propName = Config.DeliveryProps.boxProp
+    local model = GetHashKey(propName)
+
+    RequestModel(model)
+    while not HasModelLoaded(model) do
+        Citizen.Wait(100)
+    end
+
+    local function updateGrabBoxZone()
+        while DoesEntityExist(van) and not hasBox do
+            local vanPos = GetEntityCoords(van)
+            local vanHeading = GetEntityHeading(van)
+            local vanBackPosition = vector3(
+                vanPos.x + math.sin(math.rad(vanHeading)) * 3.0,
+                vanPos.y - math.cos(math.rad(vanHeading)) * 3.0,
+                vanPos.z + 0.5
+            )
+
+            exports.ox_target:removeZone(vanTargetName)
+            exports.ox_target:addBoxZone({
+                coords = vanBackPosition,
+                size = vector3(3.0, 3.0, 2.0),
+                rotation = vanHeading,
+                debug = false,
+                name = vanTargetName,
+                options = {
+                    {
+                        label = string.format("Grab Box (%d/%d)", totalDeliveryBoxes - deliveryBoxesRemaining + 1, totalDeliveryBoxes),
+                        icon = "fas fa-box",
+                        onSelect = function()
+                            if hasBox then
+                                lib.notify({
+                                    title = "Error",
+                                    description = "You are already carrying a box.",
+                                    type = "error",
+                                    duration = 10000,
+                                    position = Config.UI.notificationPosition,
+                                    markdown = Config.UI.enableMarkdown
+                                })
+                                return
+                            end
+                            if lib.progressBar({
+                                duration = 3000,
+                                position = "bottom",
+                                label = string.format("Grabbing box %d/%d...", totalDeliveryBoxes - deliveryBoxesRemaining + 1, totalDeliveryBoxes),
+                                canCancel = false,
+                                disable = { move = true, car = true, combat = true, sprint = true },
+                                anim = { dict = "mini@repair", clip = "fixing_a_ped" }
+                            }) then
+                                local playerCoords = GetEntityCoords(playerPed)
+                                boxProp = CreateObject(model, playerCoords.x, playerCoords.y, playerCoords.z, true, true, true)
+                                AttachEntityToEntity(boxProp, playerPed, GetPedBoneIndex(playerPed, 60309),
+                                    0.1, 0.2, 0.25, -90.0, 0.0, 0.0, true, true, false, true, 1, true)
+
+                                hasBox = true
+                                local animDict = "anim@heists@box_carry@"
+                                RequestAnimDict(animDict)
+                                while not HasAnimDictLoaded(animDict) do
+                                    Citizen.Wait(0)
+                                end
+                                TaskPlayAnim(playerPed, animDict, "idle", 8.0, -8.0, -1, 50, 0, false, false, false)
+
+                                exports.ox_target:removeZone(vanTargetName)
+                                TriggerEvent("team:deliverBoxWithMarker", restaurantId, van, teamData, boxProp, deliverBoxPosition)
+                            end
+                        end
+                    }
+                }
+            })
+            Citizen.Wait(1000)
+        end
+    end
+
+    Citizen.CreateThread(updateGrabBoxZone)
+end)
+
+-- Team deliver box with ground marker (same as solo)
+RegisterNetEvent("team:deliverBoxWithMarker")
+AddEventHandler("team:deliverBoxWithMarker", function(restaurantId, van, teamData, boxProp, deliverBoxPosition)
+    if not boxProp or not DoesEntityExist(boxProp) then
+        lib.notify({
+            title = "Error",
+            description = "You are not carrying a box.",
+            type = "error",
+            duration = 10000,
+            position = Config.UI.notificationPosition,
+            markdown = Config.UI.enableMarkdown
+        })
+        return
+    end
+
+    local playerPed = PlayerPedId()
+    local targetName = "team_delivery_zone_" .. restaurantId .. "_" .. tostring(GetGameTimer())
+
+    -- Create visual marker at delivery location
+    Citizen.CreateThread(function()
+        while DoesEntityExist(boxProp) do
+            DrawMarker(
+                Config.DeliveryProps.deliveryMarker.type,
+                deliverBoxPosition.x, deliverBoxPosition.y, deliverBoxPosition.z,
+                0.0, 0.0, 0.0,
+                0.0, 0.0, 0.0,
+                Config.DeliveryProps.deliveryMarker.size.x,
+                Config.DeliveryProps.deliveryMarker.size.y,
+                Config.DeliveryProps.deliveryMarker.size.z,
+                Config.DeliveryProps.deliveryMarker.color.r,
+                Config.DeliveryProps.deliveryMarker.color.g,
+                Config.DeliveryProps.deliveryMarker.color.b,
+                Config.DeliveryProps.deliveryMarker.color.a,
+                Config.DeliveryProps.deliveryMarker.bobUpAndDown,
+                Config.DeliveryProps.deliveryMarker.faceCamera,
+                2,
+                Config.DeliveryProps.deliveryMarker.rotate,
+                nil, nil, false
+            )
+            Citizen.Wait(0)
+        end
     end)
+
+    -- Create delivery target zone
+    exports.ox_target:addBoxZone({
+        coords = vector3(deliverBoxPosition.x, deliverBoxPosition.y, deliverBoxPosition.z + 0.5),
+        size = vector3(4.0, 4.0, 3.0),
+        rotation = 0,
+        debug = false,
+        name = targetName,
+        options = {
+            {
+                label = string.format("Deliver Box (%d/%d)", totalDeliveryBoxes - deliveryBoxesRemaining + 1, totalDeliveryBoxes),
+                icon = "fas fa-box",
+                onSelect = function()
+                    if not boxProp or not DoesEntityExist(boxProp) then
+                        lib.notify({
+                            title = "Error",
+                            description = "You are not carrying a box.",
+                            type = "error",
+                            duration = 10000,
+                            position = Config.UI.notificationPosition,
+                            markdown = Config.UI.enableMarkdown
+                        })
+                        return
+                    end
+                    if lib.progressBar({
+                        duration = 3000,
+                        position = "bottom",
+                        label = string.format("Delivering box %d/%d...", totalDeliveryBoxes - deliveryBoxesRemaining + 1, totalDeliveryBoxes),
+                        canCancel = false,
+                        disable = { move = true, car = true, combat = true, sprint = true },
+                        anim = { dict = "mini@repair", clip = "fixing_a_ped" }
+                    }) then
+                        DeleteObject(boxProp)
+                        ClearPedTasks(playerPed)
+                        exports.ox_target:removeZone(targetName)
+                        
+                        deliveryBoxesRemaining = deliveryBoxesRemaining - 1
+                        
+                        if deliveryBoxesRemaining > 0 then
+                            -- Continue delivery loop
+                            TriggerEvent("team:startDeliveryLoop", restaurantId, van, teamData, deliverBoxPosition)
+                        else
+                            -- All boxes delivered!
+                            lib.notify({
+                                title = "✅ Your Part Complete!", 
+                                description = "All your boxes delivered! Wait for team to finish.",
+                                type = "success",
+                                duration = 10000,
+                                position = Config.UI.notificationPosition,
+                                markdown = Config.UI.enableMarkdown
+                            })
+                            
+                            -- Report vehicle damage for coordination bonus
+                            local vehicleHealth = GetEntityHealth(van)
+                            local hasDamage = vehicleHealth < 990
+                            TriggerServerEvent("team:reportVehicleDamage", teamData.teamId, hasDamage)
+                            
+                            -- Complete member delivery
+                            TriggerServerEvent("team:completeMemberDelivery", teamData.teamId, teamData.deliveryTime)
+                            
+                            -- Don't delete vehicle - other team members might still be using it
+                        end
+                    end
+                end
+            }
+        }
+    })
+
+    lib.notify({
+        title = "Delivery Zone Active",
+        description = string.format("Drop Box %d/%d at business door", totalDeliveryBoxes - deliveryBoxesRemaining + 1, totalDeliveryBoxes),
+        type = "success",
+        duration = 10000,
+        position = Config.UI.notificationPosition,
+        markdown = Config.UI.enableMarkdown
+    })
+end)
+
+-- Handle vehicle keys for duo teams
+RegisterNetEvent("team:receiveVehicleKeys")
+AddEventHandler("team:receiveVehicleKeys", function(plate)
+    TriggerEvent("vehiclekeys:client:SetOwner", plate)
+    lib.notify({
+        title = "🗝️ Vehicle Keys",
+        description = "You received keys to the team vehicle",
+        type = "success",
+        duration = 5000,
+        position = Config.UI.notificationPosition,
+        markdown = Config.UI.enableMarkdown
+    })
+end)
