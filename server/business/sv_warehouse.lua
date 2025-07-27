@@ -7,6 +7,29 @@ local stockCache = {}
 local cacheExpiry = {}
 local CACHE_DURATION = 30000 -- 30 seconds in milliseconds
 
+local function getPlayerWarehouseLocation(source)
+    local ped = GetPlayerPed(source)
+    local coords = GetEntityCoords(ped)
+    
+    -- Check which warehouse the player is closest to
+    local closestWarehouse = 1
+    local closestDistance = 9999
+    
+    for warehouseId, warehouse in ipairs(Config.WarehousesLocation) do
+        local distance = #(coords - warehouse.position)
+        if distance < closestDistance then
+            closestDistance = distance
+            closestWarehouse = warehouseId
+        end
+    end
+    
+    -- Must be within 50 units of a warehouse
+    if closestDistance > 50 then
+        return nil
+    end
+    
+    return closestWarehouse
+end
 
 -- Cache helper functions
 local function isCacheValid(key)
@@ -79,7 +102,7 @@ local function calculateDeliveryInfo(orderGroup)
     }
 end
 
--- Get Pending Orders (MISSING IN CURRENT VERSION)
+-- Get Pending Orders
 RegisterNetEvent('warehouse:getPendingOrders')
 AddEventHandler('warehouse:getPendingOrders', function()
     local playerId = source
@@ -87,7 +110,30 @@ AddEventHandler('warehouse:getPendingOrders', function()
         return -- Silently reject unauthorized access
     end
     
-    MySQL.Async.fetchAll('SELECT * FROM supply_orders WHERE status = ?', { 'pending' }, function(results)
+    -- Determine which warehouse the player is at
+    local warehouseId = getPlayerWarehouseLocation(playerId)
+    if not warehouseId then
+        TriggerClientEvent('ox_lib:notify', playerId, {
+            title = 'Error',
+            description = 'You must be at a warehouse to view orders.',
+            type = 'error',
+            duration = 5000,
+            position = Config.UI.notificationPosition
+        })
+        return
+    end
+    
+    -- Build query based on warehouse location
+    local queryCondition = ""
+    if warehouseId == 2 then
+        -- Import warehouse - only show import orders
+        queryCondition = "WHERE status = 'pending' AND order_group_id LIKE 'import_%'"
+    else
+        -- Regular warehouse - exclude import orders
+        queryCondition = "WHERE status = 'pending' AND (order_group_id NOT LIKE 'import_%' OR order_group_id IS NULL)"
+    end
+    
+    MySQL.Async.fetchAll('SELECT * FROM supply_orders ' .. queryCondition, {}, function(results)
         if not results then
             print("[ERROR] No results from supply_orders query")
             return
@@ -100,28 +146,39 @@ AddEventHandler('warehouse:getPendingOrders', function()
             local restaurantJob = Config.Restaurants[order.restaurant_id] and Config.Restaurants[order.restaurant_id].job
             if restaurantJob then
                 local itemKey = order.ingredient:lower()
-                local item = (Config.Items[restaurantJob].Meats[itemKey] or Config.Items[restaurantJob].Vegetables[itemKey] or Config.Items[restaurantJob].Fruits[itemKey])
-                local itemLabel = itemNames[itemKey] and itemNames[itemKey].label or item and item.label or itemKey
-
-            if item then
-                local orderGroupId = order.order_group_id or tostring(order.id)
-                if not ordersByGroup[orderGroupId] then
-                    ordersByGroup[orderGroupId] = {
-                        orderGroupId = orderGroupId,
-                        id = order.id,
-                        ownerId = order.owner_id,
-                        restaurantId = order.restaurant_id,
-                        totalCost = 0,
-                        items = {}
-                    }
+                local item = nil
+                
+                -- Find item in categories
+                for category, categoryItems in pairs(Config.Items[restaurantJob]) do
+                    if categoryItems[itemKey] then
+                        item = categoryItems[itemKey]
+                        break
+                    end
                 end
-                table.insert(ordersByGroup[orderGroupId].items, {
-                    id = order.id,
-                    itemName = itemKey,        -- Keep internal name for logic
-                    itemLabel = itemLabel,     -- ADD THIS: proper display label
-                    quantity = order.quantity,
-                    totalCost = order.total_cost
-                })
+                
+                local itemLabel = itemNames[itemKey] and itemNames[itemKey].label or (item and item.label) or itemKey
+
+                if item then
+                    local orderGroupId = order.order_group_id or tostring(order.id)
+                    if not ordersByGroup[orderGroupId] then
+                        ordersByGroup[orderGroupId] = {
+                            orderGroupId = orderGroupId,
+                            id = order.id,
+                            ownerId = order.owner_id,
+                            restaurantId = order.restaurant_id,
+                            totalCost = 0,
+                            items = {},
+                            isImport = string.find(orderGroupId, "import_") ~= nil
+                        }
+                    end
+                    table.insert(ordersByGroup[orderGroupId].items, {
+                        id = order.id,
+                        itemName = itemKey,
+                        itemLabel = itemLabel,
+                        quantity = order.quantity,
+                        totalCost = order.total_cost,
+                        isImport = item.import or false
+                    })
                     ordersByGroup[orderGroupId].totalCost = ordersByGroup[orderGroupId].totalCost + order.total_cost
                 else
                     print("[ERROR] Item not found: ", itemKey, " for job: ", restaurantJob)
@@ -137,10 +194,45 @@ AddEventHandler('warehouse:getPendingOrders', function()
             local deliveryInfo = calculateDeliveryInfo(orderGroup)
             orderGroup.deliveryInfo = deliveryInfo
             
+            -- Add warehouse info
+            orderGroup.warehouseId = warehouseId
+            orderGroup.warehouseName = warehouseId == 2 and "Import Distribution Center" or "Main Warehouse"
+            
             table.insert(orders, orderGroup)
         end
         
+        -- Add warehouse info to client display
+        if #orders == 0 then
+            local warehouseName = warehouseId == 2 and "Import Distribution Center" or "Main Warehouse"
+            TriggerClientEvent('ox_lib:notify', playerId, {
+                title = 'No Orders',
+                description = 'No pending orders for ' .. warehouseName,
+                type = 'info',
+                duration = 5000,
+                position = Config.UI.notificationPosition
+            })
+        end
+        
         TriggerClientEvent('warehouse:showOrderDetails', playerId, orders)
+    end)
+end)
+
+-- Add new handler for import stock management
+RegisterNetEvent('warehouse:getImportStock')
+AddEventHandler('warehouse:getImportStock', function()
+    local src = source
+    if not hasWarehouseAccess(src) then
+        return
+    end
+    
+    MySQL.Async.fetchAll('SELECT * FROM supply_import_stock', {}, function(results)
+        local stock = {}
+        for _, item in ipairs(results) do
+            stock[item.ingredient:lower()] = item.quantity
+        end
+        
+        -- Send with import flag
+        TriggerClientEvent('restaurant:showStockDetails', src, stock, nil, true) -- true = isImportStock
     end)
 end)
 
@@ -387,17 +479,34 @@ RegisterNetEvent("warehouse:getStocks")
 AddEventHandler("warehouse:getStocks", function()
     local src = source
     if not hasWarehouseAccess(src) then
-        return -- Silently reject unauthorized access
+        return
     end
-    local playerId = source
     
-    MySQL.Async.fetchAll('SELECT * FROM supply_warehouse_stock', {}, function(results)
-        local stock = {}
-        for _, item in ipairs(results) do
-            stock[item.ingredient:lower()] = item.quantity
-        end
-        TriggerClientEvent('restaurant:showStockDetails', playerId, stock)
-    end)
+    local warehouseId = getPlayerWarehouseLocation(src)
+    if not warehouseId then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Error',
+            description = 'You must be at a warehouse to view stock.',
+            type = 'error',
+            duration = 5000,
+            position = Config.UI.notificationPosition
+        })
+        return
+    end
+    
+    if warehouseId == 2 then
+        -- Import warehouse - show import stock
+        TriggerEvent('warehouse:getImportStock', src)
+    else
+        -- Regular warehouse - existing logic
+        MySQL.Async.fetchAll('SELECT * FROM supply_warehouse_stock', {}, function(results)
+            local stock = {}
+            for _, item in ipairs(results) do
+                stock[item.ingredient:lower()] = item.quantity
+            end
+            TriggerClientEvent('restaurant:showStockDetails', src, stock)
+        end)
+    end
 end)
 
 -- Get Warehouse Stock for Ordering

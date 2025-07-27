@@ -435,6 +435,101 @@ processVehicleSpawnQueue = function(teamId)
     end
 end
 
+RegisterNetEvent('supply:teams:acceptOrder', function(teamId)
+    local src = source
+    local team = activeTeams[teamId]
+    
+    if not team then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = '❌ Error',
+            description = 'Team not found',
+            type = 'error'
+        })
+        return
+    end
+    
+    -- Verify player is team leader
+    if team.leader ~= src then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = '❌ Error',
+            description = 'Only team leader can accept orders',
+            type = 'error'
+        })
+        return
+    end
+    
+    -- Verify all members are ready
+    local allReady = true
+    for memberId, ready in pairs(team.membersReady) do
+        if not ready then
+            allReady = false
+            break
+        end
+    end
+    
+    if not allReady then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = '⚠️ Not Ready',
+            description = 'All team members must be ready',
+            type = 'warning'
+        })
+        return
+    end
+    
+    -- Get current order data
+    local orderData = team.currentOrder
+    if not orderData then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = '❌ Error',
+            description = 'No active order found',
+            type = 'error'
+        })
+        return
+    end
+    
+    -- Start the delivery for all team members
+    for _, memberId in ipairs(team.members) do
+        -- Set member as in active delivery
+        TriggerClientEvent('supply:teams:startDelivery', memberId, {
+            orderId = orderData.orderId,
+            restaurant = orderData.restaurant,
+            items = orderData.items,
+            teamId = teamId,
+            isTeamDelivery = true
+        })
+        
+        -- Update player state
+        Player(memberId).state:set('supplyDelivery', {
+            active = true,
+            teamId = teamId,
+            orderId = orderData.orderId
+        }, true)
+    end
+    
+    -- Update team state
+    team.deliveryActive = true
+    team.startTime = os.time()
+    
+    -- Notify all team members
+    for _, memberId in ipairs(team.members) do
+        TriggerClientEvent('ox_lib:notify', memberId, {
+            title = '🚚 Team Delivery Started!',
+            description = 'Head to the warehouse together!',
+            type = 'success',
+            duration = 7000,
+            icon = 'truck',
+            iconAnimation = 'bounce'
+        })
+    end
+    
+    -- Log the team delivery start
+    lib.logger(src, 'startTeamDelivery', {
+        teamId = teamId,
+        orderId = orderData.orderId,
+        memberCount = #team.members
+    })
+end)
+
 -- Client confirms vehicle is clear of spawn
 RegisterNetEvent('team:vehicleSpawnComplete')
 AddEventHandler('team:vehicleSpawnComplete', function(teamId)

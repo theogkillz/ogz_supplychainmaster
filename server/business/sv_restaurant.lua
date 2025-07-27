@@ -20,6 +20,33 @@ local function getPriceMultiplier()
     return baseMultiplier
 end
 
+-- Split orders into regular and import groups
+local function splitOrdersByImportStatus(orderItems, restaurantJob)
+    local regularOrders = {}
+    local importOrders = {}
+    
+    for _, orderItem in ipairs(orderItems) do
+        local ingredient = orderItem.ingredient:lower()
+        local isImport = false
+        
+        -- Check all categories for this item
+        for category, categoryItems in pairs(Config.Items[restaurantJob]) do
+            if categoryItems[ingredient] and categoryItems[ingredient].import then
+                isImport = true
+                break
+            end
+        end
+        
+        if isImport then
+            table.insert(importOrders, orderItem)
+        else
+            table.insert(regularOrders, orderItem)
+        end
+    end
+    
+    return regularOrders, importOrders
+end
+
 -- Handle Order Submission
 RegisterNetEvent('restaurant:orderIngredients')
 AddEventHandler('restaurant:orderIngredients', function(orderItems, restaurantId)
@@ -43,23 +70,9 @@ AddEventHandler('restaurant:orderIngredients', function(orderItems, restaurantId
         return
     end
     
-    local restaurantJob = Config.Restaurants[restaurantId] and Config.Restaurants[restaurantId].job
-    if not restaurantJob then
-        TriggerClientEvent('ox_lib:notify', playerId, {
-            title = 'Order Error',
-            description = 'Invalid restaurant configuration.',
-            type = 'error',
-            duration = 10000,
-            position = Config.UI.notificationPosition,
-            markdown = Config.UI.enableMarkdown
-        })
-        return
-    end
-
+    local restaurantJob = Config.Restaurants[restaurantId].job
     local restaurantItems = Config.Items[restaurantJob] or {}
     local totalCost = 0
-    local orderGroupId = generateOrderGroupId()
-    local queries = {}
     local priceMultiplier = getPriceMultiplier()
 
     -- Validate all items first
@@ -79,7 +92,7 @@ AddEventHandler('restaurant:orderIngredients', function(orderItems, restaurantId
             return
         end
         
-        -- Check nested structure (Meats, Vegetables, Fruits)
+        -- Check nested structure
         local item = nil
         for category, categoryItems in pairs(restaurantItems) do
             if categoryItems[ingredient] then
@@ -100,7 +113,13 @@ AddEventHandler('restaurant:orderIngredients', function(orderItems, restaurantId
             return
         end
         
-        local dynamicPrice = math.floor((item.price or 0) * priceMultiplier)
+        -- Apply import markup if applicable
+        local itemPrice = item.price or 0
+        if item.import and Config.ImportSystem and Config.ImportSystem.importMarkup then
+            itemPrice = math.floor(itemPrice * Config.ImportSystem.importMarkup)
+        end
+        
+        local dynamicPrice = math.floor(itemPrice * priceMultiplier)
         totalCost = totalCost + (dynamicPrice * quantity)
     end
 
@@ -117,39 +136,68 @@ AddEventHandler('restaurant:orderIngredients', function(orderItems, restaurantId
         return
     end
 
-    -- Process each item in the order
-    for _, orderItem in ipairs(orderItems) do
-        local ingredient = orderItem.ingredient:lower()
-        local quantity = tonumber(orderItem.quantity)
-        
-        -- Find the item again (we already validated it exists)
-        local item = nil
-        for category, categoryItems in pairs(restaurantItems) do
-            if categoryItems[ingredient] then
-                item = categoryItems[ingredient]
-                break
+    -- IMPORT SYSTEM: Split orders by type
+    local regularOrders, importOrders = splitOrdersByImportStatus(orderItems, restaurantJob)
+    
+    -- Generate order group IDs
+    local regularGroupId = #regularOrders > 0 and generateOrderGroupId() or nil
+    local importGroupId = #importOrders > 0 and ("import_" .. generateOrderGroupId()) or nil
+    
+    local queries = {}
+    local hasImports = #importOrders > 0
+    local hasRegular = #regularOrders > 0
+
+    -- Process regular orders
+    if hasRegular then
+        for _, orderItem in ipairs(regularOrders) do
+            local ingredient = orderItem.ingredient:lower()
+            local quantity = tonumber(orderItem.quantity)
+            
+            -- Find the item again
+            local item = nil
+            for category, categoryItems in pairs(restaurantItems) do
+                if categoryItems[ingredient] then
+                    item = categoryItems[ingredient]
+                    break
+                end
             end
-        end
 
-        if not item or not item.price then
-            TriggerClientEvent('ox_lib:notify', playerId, {
-                title = 'Order Error',
-                description = 'Ingredient not found: ' .. orderItem.label,
-                type = 'error',
-                duration = 10000,
-                position = Config.UI.notificationPosition,
-                markdown = Config.UI.enableMarkdown
+            local dynamicPrice = math.floor(item.price * priceMultiplier)
+            local itemCost = dynamicPrice * quantity
+            
+            table.insert(queries, {
+                query = 'INSERT INTO supply_orders (owner_id, ingredient, quantity, status, restaurant_id, total_cost, order_group_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                values = { playerId, ingredient, quantity, 'pending', restaurantId, itemCost, regularGroupId }
             })
-            return
         end
+    end
+    
+    -- Process import orders
+    if hasImports then
+        for _, orderItem in ipairs(importOrders) do
+            local ingredient = orderItem.ingredient:lower()
+            local quantity = tonumber(orderItem.quantity)
+            
+            -- Find the item again
+            local item = nil
+            for category, categoryItems in pairs(restaurantItems) do
+                if categoryItems[ingredient] then
+                    item = categoryItems[ingredient]
+                    break
+                end
+            end
 
-local dynamicPrice = math.floor(item.price * priceMultiplier)
-        local itemCost = dynamicPrice * quantity
-        
-        table.insert(queries, {
-            query = 'INSERT INTO supply_orders (owner_id, ingredient, quantity, status, restaurant_id, total_cost, order_group_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            values = { playerId, ingredient, quantity, 'pending', restaurantId, itemCost, orderGroupId }
-        })
+            -- Apply import markup
+            local itemPrice = item.price * (Config.ImportSystem.importMarkup or 1.25)
+            local dynamicPrice = math.floor(itemPrice * priceMultiplier)
+            local itemCost = dynamicPrice * quantity
+            
+            -- Regular order entry
+            table.insert(queries, {
+                query = 'INSERT INTO supply_orders (owner_id, ingredient, quantity, status, restaurant_id, total_cost, order_group_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                values = { playerId, ingredient, quantity, 'pending', restaurantId, itemCost, importGroupId }
+            })
+        end
     end
 
     -- Remove money and execute queries
@@ -157,24 +205,35 @@ local dynamicPrice = math.floor(item.price * priceMultiplier)
     
     MySQL.Async.transaction(queries, function(success)
         if success then
-            local itemList = {}
-            for _, orderItem in ipairs(orderItems) do
-                table.insert(itemList, orderItem.quantity .. " **" .. orderItem.label .. "**")
-            end
-            
-            local priceChangeText = ""
-            if priceMultiplier ~= 1.0 then
-                priceChangeText = " (**" .. math.floor((priceMultiplier - 1) * 100) .. "%** price adjustment)"
+            -- Build notification message
+            local notificationMsg = ""
+            if hasRegular and hasImports then
+                notificationMsg = string.format('Orders split! Regular items → Main Warehouse | Import items → Import Center | Total: $%d', totalCost)
+            elseif hasImports then
+                notificationMsg = string.format('Import order sent to Import Distribution Center | Total: $%d', totalCost)
+            else
+                notificationMsg = string.format('Order sent to Main Warehouse | Total: $%d', totalCost)
             end
             
             TriggerClientEvent('ox_lib:notify', playerId, {
-                title = 'Order Submitted',
-                description = string.format('Total: $%d', totalCost),
+                title = '✅ Order Submitted',
+                description = notificationMsg,
                 type = 'success',
-                duration = 3000,  -- Quick confirmation
+                duration = 8000,
                 position = Config.UI.notificationPosition
             })
-                                                                                    -- SEND ORDER NOTIFICATION EMAILS TO WAREHOUSE WORKERS
+            
+            -- Send notifications to appropriate warehouses
+            if hasRegular then
+                -- Notify main warehouse workers
+                TriggerEvent('notifications:sendWarehouseAlert', 1, regularGroupId, #regularOrders)
+            end
+            
+            if hasImports then
+                -- Notify import warehouse workers
+                TriggerEvent('notifications:sendWarehouseAlert', 2, importGroupId, #importOrders)
+            end
+    -- SEND ORDER NOTIFICATION EMAILS TO WAREHOUSE WORKERS
     local LBPhone = _G.LBPhone
 if LBPhone and Config.Notifications.phone.enabled and Config.Notifications.phone.types.new_orders then
     -- Get all online players
