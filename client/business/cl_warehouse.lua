@@ -22,26 +22,6 @@ local function hasWarehouseAccess()
     return false
 end
 
-local function getCurrentWarehouse()
-    local playerCoords = GetEntityCoords(PlayerPedId())
-    local closestWarehouse = nil
-    local closestDistance = 9999
-    
-    for index, warehouse in ipairs(Config.WarehousesLocation) do
-        local distance = #(playerCoords - warehouse.position)
-        if distance < closestDistance then
-            closestDistance = distance
-            closestWarehouse = index
-        end
-    end
-    
-    if closestDistance > 50 then
-        return nil
-    end
-    
-    return closestWarehouse
-end
-
 -- Global Variables
 local orderGroupId = nil
 local cartContainerCount = 0
@@ -165,24 +145,6 @@ AddEventHandler("warehouse:openProcessingMenu", function()
         return
     end
     
-    -- Determine which warehouse we're at
-    local warehouseId = getCurrentWarehouse()
-    if not warehouseId then
-        lib.notify({
-            title = "Error",
-            description = "You must be at a warehouse to access this menu.",
-            type = "error",
-            duration = 5000,
-            position = Config.UI.notificationPosition,
-            markdown = Config.UI.enableMarkdown
-        })
-        return
-    end
-    
-    local warehouseName = Config.WarehousesLocation[warehouseId].name or 
-                         (warehouseId == 2 and "Import Distribution Center" or "Main Warehouse")
-    local warehouseIcon = warehouseId == 2 and "🌍" or "🏭"
-    
     local options = {
         { 
             title = "📦 View Orders", 
@@ -229,21 +191,9 @@ AddEventHandler("warehouse:openProcessingMenu", function()
             end
         },
     }
-    -- Add import-specific options
-    if warehouseId == 2 then
-        table.insert(options, 3, {
-            title = "🌍 Import Tracking",
-            description = "Track incoming import shipments",
-            icon = "fas fa-ship",
-            onSelect = function()
-                TriggerEvent("imports:openTrackingMenu")
-            end
-        })
-    end
-    
     lib.registerContext({
         id = "main_menu",
-        title = warehouseIcon .. " " .. warehouseName .. " - Operations",
+        title = "🏢 Hurst Industries - Warehouse Operations",
         options = options
     })
     lib.showContext("main_menu")
@@ -424,17 +374,12 @@ AddEventHandler("warehouse:showOrderDetails", function(orders)
         
         -- Create description with all items in the order
         local itemList = {}
-        local hasImports = false
         for _, item in ipairs(orderGroup.items) do
             local itemLabel = itemNames[item.itemName:lower()] and itemNames[item.itemName:lower()].label or item.itemName
-            if item.isImport then
-                itemLabel = "🌍 " .. itemLabel -- Add import indicator
-                hasImports = true
-            end
             table.insert(itemList, item.quantity .. "x " .. itemLabel)
         end
         
-        -- Determine order size label with import indicator
+        -- Determine order size label
         local sizeLabel = ""
         if boxesNeeded <= 3 then
             sizeLabel = "🟢 Small Order"
@@ -442,10 +387,6 @@ AddEventHandler("warehouse:showOrderDetails", function(orders)
             sizeLabel = "🟡 Medium Order"
         else
             sizeLabel = "🔴 Large Order"
-        end
-        
-        if hasImports then
-            sizeLabel = sizeLabel .. " (Import)"
         end
         
         table.insert(options, {
@@ -488,51 +429,6 @@ AddEventHandler("warehouse:showOrderDetails", function(orders)
         options = options
     })
     lib.showContext("order_menu")
-end)
-
--- Add import tracking menu
-RegisterNetEvent("imports:openTrackingMenu")
-AddEventHandler("imports:openTrackingMenu", function()
-    local options = {
-        {
-            title = "📥 Incoming Shipments",
-            description = "View expected import deliveries",
-            icon = "fas fa-truck-loading",
-            onSelect = function()
-                TriggerServerEvent("imports:getIncomingShipments")
-            end
-        },
-        {
-            title = "📊 Import Analytics",
-            description = "View import trends and statistics",
-            icon = "fas fa-chart-bar",
-            onSelect = function()
-                TriggerServerEvent("imports:getAnalytics")
-            end
-        },
-        {
-            title = "🔔 Arrival Notifications",
-            description = "Configure import arrival alerts",
-            icon = "fas fa-bell",
-            onSelect = function()
-                TriggerEvent("imports:configureNotifications")
-            end
-        },
-        {
-            title = "← Back to Main Menu",
-            icon = "fas fa-arrow-left",
-            onSelect = function()
-                TriggerEvent("warehouse:openProcessingMenu")
-            end
-        }
-    }
-    
-    lib.registerContext({
-        id = "import_tracking_menu",
-        title = "🌍 Import Distribution Tracking",
-        options = options
-    })
-    lib.showContext("import_tracking_menu")
 end)
 
 -- Warehouse Stock Display
