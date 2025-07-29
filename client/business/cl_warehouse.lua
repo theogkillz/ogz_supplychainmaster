@@ -102,48 +102,104 @@ end
 
 -- Warehouse Targets and Peds
 Citizen.CreateThread(function()
-    for index, warehouse in ipairs(Config.WarehousesLocation) do
-        exports.ox_target:addBoxZone({
-            coords = warehouse.position,
-            size = vector3(1.0, 0.5, 3.5),
-            rotation = warehouse.heading,
-            debug = false,
-            options = {
-                {
-                    name = "warehouse_processing_" .. tostring(index),
-                    icon = "fas fa-box",
-                    label = "Process Orders",
-                    jobs = Config.Jobs.warehouse, -- Use jobs array instead of groups
-                    onSelect = function()
-                    TriggerEvent("warehouse:openProcessingMenu")
+    Wait(1000)
+    
+    -- Remove any existing warehouse zones
+    exports.ox_target:removeZone("warehouse_processing_1")
+    exports.ox_target:removeZone("warehouse_processing_2")
+    
+    -- WAREHOUSE 1 - Main Warehouse
+    exports.ox_target:addBoxZone({
+        coords = vector3(-80.3, 6525.98, 30.49),
+        size = vector3(3.0, 3.0, 3.0),
+        rotation = 43.09,
+        debug = false, -- Set true to see the zone
+        options = {
+            {
+                name = "main_warehouse",
+                icon = "fas fa-box",
+                label = "Access Main Warehouse",
+                jobs = Config.Jobs.warehouse,
+                onSelect = function()
+                    -- DIRECTLY specify warehouse 1
+                    TriggerEvent("warehouse:openMainMenu", 1)
                 end
-                }
             }
-        })
+        }
+    })
+    
+    -- WAREHOUSE 2 - Import Distribution Center  
+    exports.ox_target:addBoxZone({
+        coords = vector3(1181.47, -3280.73, 6.03),
+        size = vector3(3.0, 3.0, 3.0),
+        rotation = 97.63,
+        debug = false, -- Set true to see the zone
+        options = {
+            {
+                name = "import_warehouse",
+                icon = "fas fa-globe",
+                label = "Access Import Distribution Center",
+                jobs = Config.Jobs.warehouse,
+                onSelect = function()
+                    -- DIRECTLY specify warehouse 2
+                    TriggerEvent("warehouse:openMainMenu", 2)
+                end
+            }
+        }
+    })
 
-        local pedModel = GetHashKey(warehouse.pedhash)
-        RequestModel(pedModel)
-        while not HasModelLoaded(pedModel) do
-            Wait(500)
-        end
-        local ped = CreatePed(4, pedModel, warehouse.position.x, warehouse.position.y, warehouse.position.z, warehouse.heading, false, true)
-        SetEntityAsMissionEntity(ped, true, true)
-        SetBlockingOfNonTemporaryEvents(ped, true)
-        FreezeEntityPosition(ped, true)
-        SetEntityInvincible(ped, true)
-        SetModelAsNoLongerNeeded(pedModel)
+    print("[WAREHOUSE] Direct target zones created for both warehouses")
+end)
 
-        local blip = AddBlipForCoord(warehouse.position.x, warehouse.position.y, warehouse.position.z)
-        SetBlipSprite(blip, 473)
-        SetBlipDisplay(blip, 4)
-        SetBlipScale(blip, 0.6)
-        SetBlipColour(blip, 16)
-        SetBlipAsShortRange(blip, true)
-        BeginTextCommandSetBlipName("STRING")
-        AddTextComponentString("Warehouse")
-        EndTextCommandSetBlipName(blip)
-        Citizen.Wait(0)
-    end
+-- Also create the peds and blips separately
+Citizen.CreateThread(function()
+    Wait(1500)
+    
+    -- Main Warehouse Ped
+    local ped1Model = GetHashKey('s_m_y_construct_02')
+    RequestModel(ped1Model)
+    while not HasModelLoaded(ped1Model) do Wait(100) end
+    
+    local ped1 = CreatePed(4, ped1Model, -80.3, 6525.98, 30.49, 43.09, false, true)
+    SetEntityAsMissionEntity(ped1, true, true)
+    SetBlockingOfNonTemporaryEvents(ped1, true)
+    FreezeEntityPosition(ped1, true)
+    SetEntityInvincible(ped1, true)
+    
+    -- Import Warehouse Ped
+    local ped2Model = GetHashKey('s_m_m_dockwork_01')
+    RequestModel(ped2Model)
+    while not HasModelLoaded(ped2Model) do Wait(100) end
+    
+    local ped2 = CreatePed(4, ped2Model, 1181.47, -3280.73, 5.03, 97.63, false, true)
+    SetEntityAsMissionEntity(ped2, true, true)
+    SetBlockingOfNonTemporaryEvents(ped2, true)
+    FreezeEntityPosition(ped2, true)
+    SetEntityInvincible(ped2, true)
+    
+    -- Main Warehouse Blip
+    local blip1 = AddBlipForCoord(-80.3, 6525.98, 30.49)
+    SetBlipSprite(blip1, 473)
+    SetBlipDisplay(blip1, 4)
+    SetBlipScale(blip1, 0.7)
+    SetBlipColour(blip1, 4) -- Blue
+    SetBlipAsShortRange(blip1, true)
+    BeginTextCommandSetBlipName("STRING")
+    AddTextComponentString("Main Warehouse")
+    EndTextCommandSetBlipName(blip1)
+    
+    -- Import Warehouse Blip
+    local blip2 = AddBlipForCoord(1181.47, -3280.73, 6.03)
+    SetBlipSprite(blip2, 473)
+    SetBlipDisplay(blip2, 4)
+    SetBlipScale(blip2, 0.7)
+    SetBlipColour(blip2, 3) -- Yellow
+    SetBlipAsShortRange(blip2, true)
+    BeginTextCommandSetBlipName("STRING")
+    AddTextComponentString("Import Distribution Center")
+    EndTextCommandSetBlipName(blip2)
+    
+    print("[WAREHOUSE] Peds and blips created for both warehouses")
 end)
 
 -- CLEAN Warehouse Menu - Removed non-existent options
@@ -164,6 +220,10 @@ AddEventHandler("warehouse:openProcessingMenu", function()
         })
         return
     end
+
+    -- Pass warehouseId to main menu
+    TriggerEvent("warehouse:openMainMenu", warehouseId)
+end)
     
     -- Determine which warehouse we're at
     local warehouseId = getCurrentWarehouse()
@@ -179,34 +239,552 @@ AddEventHandler("warehouse:openProcessingMenu", function()
         return
     end
     
-    local warehouseName = Config.WarehousesLocation[warehouseId].name or 
-                         (warehouseId == 2 and "Import Distribution Center" or "Main Warehouse")
-    local warehouseIcon = warehouseId == 2 and "🌍" or "🏭"
+    RegisterNetEvent("warehouse:openMainMenu")
+AddEventHandler("warehouse:openMainMenu", function(warehouseId)
+    local isImportWarehouse = warehouseId == 2
+    local warehouseName = isImportWarehouse and "🌍 Import Distribution Center" or "🏭 Main Warehouse"
     
     local options = {
-        { 
-            title = "📦 View Orders", 
-            description = "Process pending delivery orders",
+        {
+            title = "📦 Process Orders",
+            description = isImportWarehouse and "Handle import deliveries" or "Accept and deliver orders",
             icon = "fas fa-clipboard-list",
-            onSelect = function() TriggerServerEvent("warehouse:getPendingOrders") end 
-        },
-        { 
-            title = "📊 View Stock", 
-            description = "Check warehouse inventory levels",
-            icon = "fas fa-warehouse",
-            onSelect = function() TriggerServerEvent("warehouse:getStocks") end 
+            onSelect = function()
+                TriggerServerEvent("warehouse:requestOrdersMenu", warehouseId)
+            end
         },
         {
-            title = "🚨 Stock Alerts",
-            description = "View low stock warnings and predictions",
+            title = "📊 View Stock",
+            description = "Check current inventory levels by category",
+            icon = "fas fa-warehouse",
+            onSelect = function()
+                TriggerEvent("warehouse:openStockCategories", warehouseId)
+            end
+        },
+        {
+            title = "🚚 Vehicle Management",
+            description = "Spawn or return delivery vehicles",
+            icon = "fas fa-truck",
+            onSelect = function()
+                TriggerEvent("warehouse:openVehicleMenu", warehouseId)
+            end
+        }
+    }
+    
+    -- Only add Stock Alerts for Main Warehouse (NOT Import)
+    if not isImportWarehouse then
+        table.insert(options, {
+            title = "⚠️ Stock Alert Dashboard",
+            description = "Monitor critical stock levels",
             icon = "fas fa-exclamation-triangle",
             onSelect = function()
-                TriggerServerEvent("stockalerts:getAlerts")
+                TriggerServerEvent("stockalerts:getDashboard")
+            end
+        })
+    end
+    
+    -- Add team delivery option
+    table.insert(options, {
+        title = "👥 Team Deliveries",
+        description = "Join or create delivery teams",
+        icon = "fas fa-users",
+        onSelect = function()
+            TriggerEvent("teamdelivery:openMainMenu", warehouseId)
+        end
+    })
+    
+    -- Add Import tracking for Import Warehouse only
+    if isImportWarehouse then
+        table.insert(options, {
+            title = "🌍 Import Tracking",
+            description = "Track incoming import shipments",
+            icon = "fas fa-globe",
+            onSelect = function()
+                TriggerServerEvent("warehouse:getImportTracking")
+            end
+        })
+    end
+    
+    -- Add leaderboards and achievements
+    table.insert(options, {
+        title = "🏆 Leaderboards & Stats",
+        description = "View rankings and personal performance",
+        icon = "fas fa-trophy",
+        onSelect = function()
+            TriggerEvent("warehouse:openStatsMenu", warehouseId)
+        end
+    })
+    
+    -- Add help & tips
+    table.insert(options, {
+        title = "❓ Help & Tips",
+        description = "Learn warehouse operations and strategies",
+        icon = "fas fa-question-circle",
+        onSelect = function()
+            TriggerEvent("warehouse:openHelpMenu", warehouseId)
+        end
+    })
+    
+    lib.registerContext({
+        id = "warehouse_main_menu",
+        title = warehouseName,
+        options = options
+    })
+    lib.showContext("warehouse_main_menu")
+end)
+
+-- New Stock Categories Menu
+RegisterNetEvent("warehouse:openStockCategories")
+AddEventHandler("warehouse:openStockCategories", function(warehouseId)
+    local isImportWarehouse = warehouseId == 2
+    
+    local options = {
+        {
+            title = "← Back to Main Menu",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openMainMenu", warehouseId)
+            end
+        }
+    }
+    
+    -- Category options with visual polish
+    local categories = {
+        { name = "Meats", icon = "🥩", color = "#E74C3C" },
+        { name = "Vegetables", icon = "🥬", color = "#27AE60" },
+        { name = "Fruits", icon = "🍎", color = "#E67E22" },
+        { name = "Dairy", icon = "🧀", color = "#F39C12" },
+        { name = "DryGoods", icon = "🌾", color = "#8B6914" },
+        { name = "Beverages", icon = "🥤", color = "#3498DB" },
+        { name = "Seafood", icon = "🦐", color = "#5DADE2" }
+    }
+    
+    for _, category in ipairs(categories) do
+        table.insert(options, {
+            title = category.icon .. " " .. category.name,
+            description = "View " .. category.name:lower() .. " inventory",
+            icon = "fas fa-box",
+            onSelect = function()
+                TriggerServerEvent("warehouse:requestCategoryStock", warehouseId, category.name)
+            end
+        })
+    end
+    
+    -- Add summary option
+    table.insert(options, {
+        title = "📊 Stock Summary",
+        description = "View total inventory overview",
+        icon = "fas fa-chart-bar",
+        onSelect = function()
+            TriggerServerEvent("warehouse:requestStockSummary", warehouseId)
+        end
+    })
+    
+    local warehouseType = isImportWarehouse and "Import" or "Warehouse"
+    
+    lib.registerContext({
+        id = "warehouse_stock_categories",
+        title = "📊 " .. warehouseType .. " Stock Categories",
+        options = options
+    })
+    lib.showContext("warehouse_stock_categories")
+end)
+
+-- Display Category Stock with visual polish
+RegisterNetEvent("warehouse:showCategoryStock")
+AddEventHandler("warehouse:showCategoryStock", function(warehouseId, category, stockData)
+    local categoryIcons = {
+        Meats = "🥩",
+        Vegetables = "🥬",
+        Fruits = "🍎",
+        Dairy = "🧀",
+        DryGoods = "🌾",
+        Beverages = "🥤",
+        Seafood = "🦐"
+    }
+    
+    local options = {
+        {
+            title = "← Back to Categories",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openStockCategories", warehouseId)
+            end
+        }
+    }
+    
+    if not stockData or #stockData == 0 then
+        table.insert(options, {
+            title = "📦 No Stock",
+            description = "This category is currently empty",
+            disabled = true
+        })
+    else
+        -- Sort by quantity (highest first)
+        table.sort(stockData, function(a, b) return a.quantity > b.quantity end)
+        
+        local totalItems = 0
+        local totalValue = 0
+        
+        for _, item in ipairs(stockData) do
+            totalItems = totalItems + item.quantity
+            totalValue = totalValue + (item.quantity * item.price)
+            
+            -- Stock level indicator
+            local stockIcon = "🟢"
+            local stockStatus = "Healthy"
+            if item.percentage then
+                if item.percentage <= 20 then 
+                    stockIcon = "🔴"
+                    stockStatus = "Critical"
+                elseif item.percentage <= 50 then 
+                    stockIcon = "🟡"
+                    stockStatus = "Low"
+                end
+            end
+            
+            -- Import indicator
+            local importIcon = item.isImport and " 🌍" or ""
+            
+            table.insert(options, {
+                title = stockIcon .. " " .. item.label .. importIcon,
+                description = string.format("Stock: %d units • Value: $%d • Status: %s",
+                    item.quantity, item.quantity * item.price, stockStatus),
+                metadata = {
+                    ["Quantity"] = item.quantity .. " units",
+                    ["Unit Price"] = "$" .. item.price,
+                    ["Total Value"] = "$" .. (item.quantity * item.price),
+                    ["Stock Level"] = item.percentage and math.floor(item.percentage) .. "%" or "N/A",
+                    ["Type"] = item.isImport and "Import 🌍" or "Local"
+                },
+                disabled = true
+            })
+        end
+        
+        -- Add category summary
+        table.insert(options, 1, {
+            title = "📊 Category Summary",
+            description = string.format("Total Items: %d • Total Value: $%d",
+                totalItems, totalValue),
+            disabled = true
+        })
+    end
+    
+    local warehouseType = warehouseId == 2 and "Import" or "Warehouse"
+    
+    lib.registerContext({
+        id = "warehouse_category_stock",
+        title = categoryIcons[category] .. " " .. category .. " - " .. warehouseType .. " Stock",
+        options = options
+    })
+    lib.showContext("warehouse_category_stock")
+end)
+
+-- Stock Summary Display
+RegisterNetEvent("warehouse:showStockSummary")
+AddEventHandler("warehouse:showStockSummary", function(warehouseId, summaryData)
+    local options = {
+        {
+            title = "← Back to Categories",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openStockCategories", warehouseId)
+            end
+        }
+    }
+    
+    -- Overall summary
+    table.insert(options, {
+        title = "📊 Total Inventory Overview",
+        description = string.format("Total Items: %d • Total Value: $%s • Categories: %d",
+            summaryData.totalItems, 
+            string.format("%.0f", summaryData.totalValue),
+            summaryData.categoryCount),
+        disabled = true
+    })
+    
+    -- Category breakdowns
+    for category, data in pairs(summaryData.categories) do
+        local categoryIcons = {
+            Meats = "🥩",
+            Vegetables = "🥬",
+            Fruits = "🍎",
+            Dairy = "🧀",
+            DryGoods = "🌾",
+            Beverages = "🥤",
+            Seafood = "🦐"
+        }
+        
+        local icon = categoryIcons[category] or "📦"
+        
+        table.insert(options, {
+            title = icon .. " " .. category,
+            description = string.format("Items: %d • Value: $%d • %.1f%% of total",
+                data.items, data.value, (data.value / summaryData.totalValue) * 100),
+            metadata = {
+                ["Item Count"] = data.items .. " units",
+                ["Category Value"] = "$" .. data.value,
+                ["% of Inventory"] = string.format("%.1f%%", (data.value / summaryData.totalValue) * 100),
+                ["Avg Item Value"] = "$" .. math.floor(data.value / data.items)
+            },
+            onSelect = function()
+                TriggerServerEvent("warehouse:requestCategoryStock", warehouseId, category)
+            end
+        })
+    end
+    
+    -- Stock health indicators
+    if summaryData.stockHealth then
+        table.insert(options, {
+            title = "🏥 Stock Health Analysis",
+            description = string.format("🔴 Critical: %d • 🟡 Low: %d • 🟢 Healthy: %d",
+                summaryData.stockHealth.critical,
+                summaryData.stockHealth.low,
+                summaryData.stockHealth.healthy),
+            disabled = true
+        })
+    end
+    
+    local warehouseType = warehouseId == 2 and "Import" or "Warehouse"
+    
+    lib.registerContext({
+        id = "warehouse_stock_summary",
+        title = "📊 " .. warehouseType .. " Stock Summary",
+        options = options
+    })
+    lib.showContext("warehouse_stock_summary")
+end)
+
+-- Help Menu for Warehouse
+RegisterNetEvent("warehouse:openHelpMenu")
+AddEventHandler("warehouse:openHelpMenu", function(warehouseId)
+    local isImportWarehouse = warehouseId == 2
+    
+    local options = {
+        {
+            title = "← Back to Main Menu",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openMainMenu", warehouseId)
+            end
+        },
+        {
+            title = "📦 Delivery System",
+            description = "Understanding the delivery process",
+            icon = "fas fa-truck",
+            onSelect = function()
+                lib.notify({
+                    title = "📦 Delivery System",
+                    description = [[
+**Solo Delivery Process:**
+1. Accept order from menu
+2. Load boxes at warehouse
+3. Drive to restaurant
+4. Unload at marked location
+5. Return van for payment
+
+**Box Loading:**
+• Small: 1-3 boxes (quick)
+• Medium: 4-7 boxes
+• Large: 8+ boxes (team recommended)]],
+                    type = "info",
+                    duration = 15000,
+                    position = Config.UI.notificationPosition,
+                    markdown = true
+                })
+            end
+        }
+    }
+    
+    -- Warehouse-specific help
+    if isImportWarehouse then
+        table.insert(options, 2, {
+            title = "🌍 Import System",
+            description = "How import deliveries work",
+            icon = "fas fa-globe",
+            onSelect = function()
+                lib.notify({
+                    title = "🌍 Import System",
+                    description = [[
+**Import Distribution:**
+• Premium global ingredients
+• 25% markup on items
+• 15% delivery bonus
+• Separate from regular stock
+• Special handling required
+
+**Import Orders:**
+• Marked with 🌍 icon
+• Higher pay rates
+• Delivered to restaurants]],
+                    type = "info",
+                    duration = 15000,
+                    position = Config.UI.notificationPosition,
+                    markdown = true
+                })
+            end
+        })
+    else
+        table.insert(options, 2, {
+            title = "⚠️ Stock Alerts",
+            description = "Managing inventory levels",
+            icon = "fas fa-exclamation-triangle",
+            onSelect = function()
+                lib.notify({
+                    title = "⚠️ Stock Management",
+                    description = [[
+**Alert Levels:**
+🔴 Critical: <5% (urgent!)
+🟡 Low: <20% (restock soon)
+🔵 Moderate: <50% (plan ahead)
+🟢 Healthy: 50%+ (all good)
+
+**Your Role:**
+• Monitor stock levels
+• Prioritize critical items
+• Coordinate with farmers]],
+                    type = "info",
+                    duration = 15000,
+                    position = Config.UI.notificationPosition,
+                    markdown = true
+                })
+            end
+        })
+    end
+    
+    -- Common help topics
+    table.insert(options, {
+        title = "💰 Payment System",
+        description = "How delivery payments work",
+        icon = "fas fa-dollar-sign",
+        onSelect = function()
+            lib.notify({
+                title = "💰 Payment System",
+                description = [[
+**Base Pay:**
+• 22% of order value
+• Paid on van return
+
+**Solo Bonuses:**
+⚡ Speed: Up to 40%
+📦 Volume: $50-200
+🎯 Perfect: +$100
+
+**Earnings Tips:**
+• Deliver fast for speed bonus
+• Take large orders
+• Maintain delivery streak]],
+                type = "info",
+                duration = 15000,
+                position = Config.UI.notificationPosition,
+                markdown = true
+            })
+        end
+    })
+    
+    table.insert(options, {
+        title = "🏆 Achievements",
+        description = "Vehicle upgrades and rewards",
+        icon = "fas fa-trophy",
+        onSelect = function()
+            lib.notify({
+                title = "🏆 Achievement System",
+                description = [[
+**Vehicle Tiers:**
+🥈 Rookie: 10 deliveries
+🔵 Experienced: 50 deliveries
+💜 Professional: 150 deliveries
+🥇 Elite: 300 deliveries
+🔴 Legendary: 500 deliveries
+
+**Benefits:**
+• Performance upgrades
+• Visual enhancements
+• Speed bonuses
+• Fuel efficiency]],
+                type = "info",
+                duration = 15000,
+                position = Config.UI.notificationPosition,
+                markdown = true
+            })
+        end
+    })
+    
+    table.insert(options, {
+        title = "🎯 Pro Tips",
+        description = "Maximize your efficiency",
+        icon = "fas fa-lightbulb",
+        onSelect = function()
+            lib.notify({
+                title = "🎯 Pro Tips",
+                description = [[
+**Solo Efficiency:**
+• Check order size before accepting
+• Plan your route
+• Keep van damage minimal
+• Build delivery streaks
+• Monitor stock alerts
+
+**Team Work:**
+• See Team Deliveries menu
+• Coordinate for big orders
+• Share bonuses]],
+                type = "info",
+                duration = 12000,
+                position = Config.UI.notificationPosition,
+                markdown = true
+            })
+        end
+    })
+    
+    table.insert(options, {
+        title = "📱 Notifications",
+        description = "Email and alert settings",
+        icon = "fas fa-bell",
+        onSelect = function()
+            lib.notify({
+                title = "📱 Notifications",
+                description = [[
+**Email Alerts:**
+• New orders available
+• Duty summaries
+• Achievement unlocks
+• Market changes
+
+**Setup Required:**
+• Have phone equipped
+• Email account active
+• Check emails regularly]],
+                type = "info",
+                duration = 10000,
+                position = Config.UI.notificationPosition,
+                markdown = true
+            })
+        end
+    })
+    
+    lib.registerContext({
+        id = "warehouse_help_menu",
+        title = "❓ Warehouse Help & Tips",
+        options = options
+    })
+    lib.showContext("warehouse_help_menu")
+end)
+
+-- Stats & Leaderboards Menu
+RegisterNetEvent("warehouse:openStatsMenu")
+AddEventHandler("warehouse:openStatsMenu", function(warehouseId)
+    local options = {
+        {
+            title = "← Back to Main Menu",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openMainMenu", warehouseId)
             end
         },
         {
             title = "🏆 Driver Leaderboards",
-            description = "View top performing drivers and rankings",
+            description = "View top performing drivers",
             icon = "fas fa-trophy",
             onSelect = function()
                 TriggerEvent("leaderboard:openMenu")
@@ -214,7 +792,7 @@ AddEventHandler("warehouse:openProcessingMenu", function()
         },
         {
             title = "📊 My Performance",
-            description = "View your delivery stats, streaks, and daily progress",
+            description = "View your delivery stats and progress",
             icon = "fas fa-chart-line",
             onSelect = function()
                 TriggerServerEvent("leaderboard:getPersonalStats")
@@ -222,31 +800,169 @@ AddEventHandler("warehouse:openProcessingMenu", function()
         },
         {
             title = "🏆 Achievement Progress",
-            description = "View achievement progress and vehicle tier",
+            description = "Check your vehicle tier and milestones",
             icon = "fas fa-medal",
             onSelect = function()
                 TriggerServerEvent("achievements:getProgress")
             end
         },
-    }
-    -- Add import-specific options
-    if warehouseId == 2 then
-        table.insert(options, 3, {
-            title = "🌍 Import Tracking",
-            description = "Track incoming import shipments",
-            icon = "fas fa-ship",
+        {
+            title = "👥 Team Leaderboards",
+            description = "View top delivery teams",
+            icon = "fas fa-users",
             onSelect = function()
-                TriggerEvent("imports:openTrackingMenu")
+                TriggerEvent("team:openLeaderboardMenu")
             end
-        })
-    end
+        }
+    }
     
     lib.registerContext({
-        id = "main_menu",
-        title = warehouseIcon .. " " .. warehouseName .. " - Operations",
+        id = "warehouse_stats_menu",
+        title = "🏆 Leaderboards & Statistics",
         options = options
     })
-    lib.showContext("main_menu")
+    lib.showContext("warehouse_stats_menu")
+end)
+
+-- Vehicle Management Menu
+RegisterNetEvent("warehouse:openVehicleMenu")
+AddEventHandler("warehouse:openVehicleMenu", function(warehouseId)
+    local options = {
+        {
+            title = "← Back to Main Menu",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openMainMenu", warehouseId)
+            end
+        },
+        {
+            title = "🚚 Vehicle Information",
+            description = "Learn about delivery vehicles",
+            icon = "fas fa-info-circle",
+            onSelect = function()
+                lib.notify({
+                    title = "🚚 Delivery Vehicles",
+                    description = [[
+**Vehicle Selection:**
+• Automatic based on order size
+• Small orders: Standard van
+• Large orders: Heavy truck
+
+**Achievement Upgrades:**
+• Better handling at higher tiers
+• Speed improvements
+• Fuel efficiency
+• Visual enhancements]],
+                    type = "info",
+                    duration = 12000,
+                    position = Config.UI.notificationPosition,
+                    markdown = true
+                })
+            end
+        }
+    }
+    
+    lib.registerContext({
+        id = "warehouse_vehicle_menu",
+        title = "🚚 Vehicle Management",
+        options = options
+    })
+    lib.showContext("warehouse_vehicle_menu")
+end)
+
+-- Import Tracking Handlers
+RegisterNetEvent("warehouse:getImportTracking")
+AddEventHandler("warehouse:getImportTracking", function()
+    TriggerEvent("imports:openTrackingMenu")
+end)
+
+-- Updated import tracking menu
+RegisterNetEvent("imports:openTrackingMenu")
+AddEventHandler("imports:openTrackingMenu", function()
+    local options = {
+        {
+            title = "📥 Incoming Shipments",
+            description = "View expected import deliveries",
+            icon = "fas fa-truck-loading",
+            onSelect = function()
+                TriggerServerEvent("imports:getIncomingShipments")
+            end
+        },
+        {
+            title = "📊 Import Analytics",
+            description = "View import trends and statistics",
+            icon = "fas fa-chart-bar",
+            onSelect = function()
+                TriggerServerEvent("imports:getAnalytics")
+            end
+        },
+        {
+            title = "🔔 Arrival Notifications",
+            description = "Configure import arrival alerts",
+            icon = "fas fa-bell",
+            onSelect = function()
+                TriggerEvent("imports:configureNotifications")
+            end
+        },
+        {
+            title = "🌍 Import System Info",
+            description = "Learn about import operations",
+            icon = "fas fa-info-circle",
+            onSelect = function()
+                lib.notify({
+                    title = "🌍 Import Distribution",
+                    description = [[
+**How Imports Work:**
+1. Orders marked 'import_' route here
+2. Premium items with 25% markup
+3. Separate stock tracking
+4. Higher delivery bonuses
+
+**Import Tracking:**
+• Monitor incoming shipments
+• View delivery analytics
+• Get arrival notifications
+• Track performance metrics]],
+                    type = "info",
+                    duration = 15000,
+                    position = Config.UI.notificationPosition,
+                    markdown = true
+                })
+            end
+        },
+        {
+            title = "← Back to Main Menu",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openMainMenu", 2) -- Import warehouse ID
+            end
+        }
+    }
+    
+    lib.registerContext({
+        id = "import_tracking_menu",
+        title = "🌍 Import Distribution Tracking",
+        options = options
+    })
+    lib.showContext("import_tracking_menu")
+end)
+
+-- Legacy menu redirect (for backward compatibility)
+RegisterNetEvent("warehouse:getPendingOrders")
+AddEventHandler("warehouse:getPendingOrders", function()
+    local warehouseId = getCurrentWarehouse()
+    if warehouseId then
+        TriggerServerEvent("warehouse:requestOrdersMenu", warehouseId)
+    end
+end)
+
+-- Legacy stock view redirect
+RegisterNetEvent("warehouse:getStocks")
+AddEventHandler("warehouse:getStocks", function()
+    local warehouseId = getCurrentWarehouse()
+    if warehouseId then
+        TriggerEvent("warehouse:openStockCategories", warehouseId)
+    end
 end)
 
 -- Team Deliveries Submenu
