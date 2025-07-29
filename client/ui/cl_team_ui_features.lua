@@ -1,5 +1,6 @@
 -- TEAM UI FEATURES: Performance Tips & Leaderboard Integration
 local QBCore = exports['qb-core']:GetCoreObject()
+local currentWarehouseId = nil
 
 -- Show performance tips for team coordination
 RegisterNetEvent("team:showPerformanceTips")
@@ -114,7 +115,7 @@ AddEventHandler("team:openLeaderboardMenu", function()
                 if currentTeam then
                     TriggerEvent("team:showRecruitmentMenu", currentTeam)
                 else
-                    TriggerEvent("leaderboard:openMenu")
+                    TriggerEvent("warehouse:openTeamMenu", currentWarehouseId or 1)
                 end
             end
         }

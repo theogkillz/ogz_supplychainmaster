@@ -89,7 +89,7 @@ AddEventHandler('team:showLeaderboard', function(teams, timeframe)
             if currentTeam then
                 TriggerEvent("team:showRecruitmentMenu", currentTeam)
             else
-                TriggerEvent("warehouse:openProcessingMenu")
+                TriggerEvent("warehouse:openTeamMenu")
             end
         end
     })
@@ -137,7 +137,7 @@ AddEventHandler('team:openLeaderboardMenu', function()
                 if currentTeam then
                     TriggerEvent("team:showRecruitmentMenu", currentTeam)
                 else
-                    TriggerEvent("warehouse:openProcessingMenu")
+                    TriggerEvent("warehouse:openTeamMenu")
                 end
             end
         }

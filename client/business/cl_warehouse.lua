@@ -105,101 +105,79 @@ Citizen.CreateThread(function()
     Wait(1000)
     
     -- Remove any existing warehouse zones
-    exports.ox_target:removeZone("warehouse_processing_1")
-    exports.ox_target:removeZone("warehouse_processing_2")
+    for i = 1, #Config.WarehousesLocation do
+        exports.ox_target:removeZone("warehouse_processing_" .. i)
+    end
     
-    -- WAREHOUSE 1 - Main Warehouse
-    exports.ox_target:addBoxZone({
-        coords = vector3(-80.3, 6525.98, 30.49),
-        size = vector3(3.0, 3.0, 3.0),
-        rotation = 43.09,
-        debug = false, -- Set true to see the zone
-        options = {
-            {
-                name = "main_warehouse",
-                icon = "fas fa-box",
-                label = "Access Main Warehouse",
-                jobs = Config.Jobs.warehouse,
-                onSelect = function()
-                    -- DIRECTLY specify warehouse 1
-                    TriggerEvent("warehouse:openMainMenu", 1)
-                end
+    -- Create target zones using Config.WarehousesLocation
+    for warehouseId, warehouse in ipairs(Config.WarehousesLocation) do
+        local zoneName = "warehouse_processing_" .. warehouseId
+        
+        exports.ox_target:addBoxZone({
+            coords = vector3(warehouse.position.x, warehouse.position.y, warehouse.position.z),
+            size = vector3(3.0, 3.0, 3.0),
+            rotation = warehouse.heading,
+            debug = false,
+            options = {
+                {
+                    name = warehouseId == 2 and "import_warehouse" or "main_warehouse",
+                    icon = warehouseId == 2 and "fas fa-globe" or "fas fa-box",
+                    label = "Access " .. warehouse.name,
+                    jobs = Config.Jobs.warehouse,
+                    onSelect = function()
+                        -- DIRECTLY specify warehouse ID from config
+                        TriggerEvent("warehouse:openMainMenu", warehouseId)
+                    end
+                }
             }
-        }
-    })
-    
-    -- WAREHOUSE 2 - Import Distribution Center  
-    exports.ox_target:addBoxZone({
-        coords = vector3(1181.47, -3280.73, 6.03),
-        size = vector3(3.0, 3.0, 3.0),
-        rotation = 97.63,
-        debug = false, -- Set true to see the zone
-        options = {
-            {
-                name = "import_warehouse",
-                icon = "fas fa-globe",
-                label = "Access Import Distribution Center",
-                jobs = Config.Jobs.warehouse,
-                onSelect = function()
-                    -- DIRECTLY specify warehouse 2
-                    TriggerEvent("warehouse:openMainMenu", 2)
-                end
-            }
-        }
-    })
-
-    print("[WAREHOUSE] Direct target zones created for both warehouses")
+        })
+        
+        print(string.format("[WAREHOUSE] Created target zone for %s (Warehouse %d)", warehouse.name, warehouseId))
+    end
 end)
 
--- Also create the peds and blips separately
+-- Create peds and blips separately
 Citizen.CreateThread(function()
     Wait(1500)
     
-    -- Main Warehouse Ped
-    local ped1Model = GetHashKey('s_m_y_construct_02')
-    RequestModel(ped1Model)
-    while not HasModelLoaded(ped1Model) do Wait(100) end
+    -- Create peds using Config.WarehousesLocation data
+    for warehouseId, warehouse in ipairs(Config.WarehousesLocation) do
+        -- Request the model
+        local pedModel = GetHashKey(warehouse.pedhash)
+        RequestModel(pedModel)
+        while not HasModelLoaded(pedModel) do 
+            Wait(100) 
+        end
+        
+        -- Create the ped
+        local ped = CreatePed(4, pedModel, 
+            warehouse.position.x, 
+            warehouse.position.y, 
+            warehouse.position.z - 1.0, -- Adjust Z slightly
+            warehouse.heading, 
+            false, true)
+            
+        -- Configure the ped
+        SetEntityAsMissionEntity(ped, true, true)
+        SetBlockingOfNonTemporaryEvents(ped, true)
+        FreezeEntityPosition(ped, true)
+        SetEntityInvincible(ped, true)
+        
+        -- Create blip for this warehouse
+        local blip = AddBlipForCoord(warehouse.position.x, warehouse.position.y, warehouse.position.z)
+        SetBlipSprite(blip, 473)
+        SetBlipDisplay(blip, 4)
+        SetBlipScale(blip, 0.7)
+        SetBlipColour(blip, warehouseId == 2 and 3 or 4) -- Yellow for import, Blue for main
+        SetBlipAsShortRange(blip, true)
+        BeginTextCommandSetBlipName("STRING")
+        AddTextComponentString(warehouse.name)
+        EndTextCommandSetBlipName(blip)
+        
+        print(string.format("[WAREHOUSE] Created ped and blip for %s", warehouse.name))
+    end
     
-    local ped1 = CreatePed(4, ped1Model, -80.3, 6525.98, 30.49, 43.09, false, true)
-    SetEntityAsMissionEntity(ped1, true, true)
-    SetBlockingOfNonTemporaryEvents(ped1, true)
-    FreezeEntityPosition(ped1, true)
-    SetEntityInvincible(ped1, true)
-    
-    -- Import Warehouse Ped
-    local ped2Model = GetHashKey('s_m_m_dockwork_01')
-    RequestModel(ped2Model)
-    while not HasModelLoaded(ped2Model) do Wait(100) end
-    
-    local ped2 = CreatePed(4, ped2Model, 1181.47, -3280.73, 5.03, 97.63, false, true)
-    SetEntityAsMissionEntity(ped2, true, true)
-    SetBlockingOfNonTemporaryEvents(ped2, true)
-    FreezeEntityPosition(ped2, true)
-    SetEntityInvincible(ped2, true)
-    
-    -- Main Warehouse Blip
-    local blip1 = AddBlipForCoord(-80.3, 6525.98, 30.49)
-    SetBlipSprite(blip1, 473)
-    SetBlipDisplay(blip1, 4)
-    SetBlipScale(blip1, 0.7)
-    SetBlipColour(blip1, 4) -- Blue
-    SetBlipAsShortRange(blip1, true)
-    BeginTextCommandSetBlipName("STRING")
-    AddTextComponentString("Main Warehouse")
-    EndTextCommandSetBlipName(blip1)
-    
-    -- Import Warehouse Blip
-    local blip2 = AddBlipForCoord(1181.47, -3280.73, 6.03)
-    SetBlipSprite(blip2, 473)
-    SetBlipDisplay(blip2, 4)
-    SetBlipScale(blip2, 0.7)
-    SetBlipColour(blip2, 3) -- Yellow
-    SetBlipAsShortRange(blip2, true)
-    BeginTextCommandSetBlipName("STRING")
-    AddTextComponentString("Import Distribution Center")
-    EndTextCommandSetBlipName(blip2)
-    
-    print("[WAREHOUSE] Peds and blips created for both warehouses")
+    print("[WAREHOUSE] All warehouse entities created from config")
 end)
 
 -- CLEAN Warehouse Menu - Removed non-existent options
@@ -285,13 +263,13 @@ AddEventHandler("warehouse:openMainMenu", function(warehouseId)
     
     -- Add team delivery option
     table.insert(options, {
-        title = "👥 Team Deliveries",
-        description = "Join or create delivery teams",
-        icon = "fas fa-users",
-        onSelect = function()
-            TriggerEvent("teamdelivery:openMainMenu", warehouseId)
-        end
-    })
+    title = "👥 Team Deliveries",
+    description = "Join or create delivery teams",
+    icon = "fas fa-users",
+    onSelect = function()
+        TriggerEvent("warehouse:openTeamMenu", warehouseId) -- Fixed event name!
+    end
+})
     
     -- Add Import tracking for Import Warehouse only
     if isImportWarehouse then

@@ -5,6 +5,7 @@ local currentTeam = nil
 local teamDeliveryData = nil
 local isReady = false
 local allMembersReady = false -- Track if all members are ready
+local currentWarehouseId = nil
 
 -- Shared delivery tracking (same as solo)
 local deliveryBoxesRemaining = 0
@@ -224,9 +225,11 @@ RegisterNetEvent("team:showRecruitmentMenu")
 AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
     currentTeam = teamId
     
-    -- Update allMembersReady if teamData provided
+    -- Update state from teamData if provided
+    local isLeader = false
     if teamData then
         allMembersReady = teamData.allReady
+        isLeader = teamData.isLeader
     end
     
     local options = {
@@ -234,7 +237,21 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
             title = string.format("📋 Team ID: %s", teamId),
             description = "Share this ID with other drivers to join",
             icon = "fas fa-clipboard",
-            disabled = true  -- Just for display
+            metadata = {
+                ["Team ID"] = teamId,
+                ["Your Role"] = isLeader and "👑 Team Leader" or "👥 Team Member"
+            },
+            onSelect = function()
+                -- Copy to clipboard functionality
+                lib.setClipboard(teamId)
+                lib.notify({
+                    title = "📋 Copied!",
+                    description = "Team ID copied to clipboard",
+                    type = "success",
+                    duration = 3000,
+                    position = Config.UI.notificationPosition
+                })
+            end
         },
         {
             title = "👥 Team Status",
@@ -246,42 +263,80 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
         },
         {
             title = isReady and "✅ Ready" or "⏸️ Not Ready",
-            description = isReady and "Click to unready" or "Click when ready to start",
+            description = isReady and "Click to unready" or "Mark yourself ready to start",
             icon = isReady and "fas fa-check-circle" or "fas fa-pause-circle",
+            iconColor = isReady and "#4CAF50" or "#FFA726",
             onSelect = function()
                 isReady = not isReady
                 TriggerServerEvent("team:setReady", teamId, isReady)
-                Citizen.Wait(100)
-                TriggerEvent("team:showRecruitmentMenu", teamId)
+                
+                -- Refresh menu after short delay
+                Citizen.SetTimeout(500, function()
+                    TriggerServerEvent("team:getTeamData", teamId)
+                end)
             end
         }
     }
     
-    -- SESSION 38 FIX: Add Accept Team Order button when all members are ready
-    if allMembersReady and teamData and teamData.isLeader then
-        table.insert(options, 4, { -- Insert after ready button
+    -- ACCEPT ORDER BUTTON - Only show when conditions are met
+    if allMembersReady and isLeader then
+        table.insert(options, 4, {
             title = '🚚 Accept Team Order',
-            description = 'Start delivery with your team (All members ready!)',
-            icon = 'truck-fast',
+            description = '✅ All members ready! Start the delivery!',
+            icon = 'fas fa-truck-fast',
             iconColor = '#4CAF50',
             onSelect = function()
-                -- Close the menu
-                lib.hideContext()
-                
-                -- Notify team members
-                lib.notify({
-                    title = '📦 Team Delivery Starting',
-                    description = 'Your team is accepting the order!',
-                    type = 'success',
-                    duration = 5000
-                })
-                
-                -- Trigger server event to accept order
-                TriggerServerEvent('supply:teams:acceptOrder', teamId)
+                -- Confirmation dialog
+                lib.alertDialog({
+                    header = "Start Team Delivery?",
+                    content = "This will start the delivery for all team members. Make sure everyone is ready!",
+                    centered = true,
+                    cancel = true,
+                    labels = {
+                        cancel = "Wait",
+                        confirm = "Start Delivery"
+                    }
+                }, function(response)
+                    if response == "confirm" then
+                        -- Close the menu
+                        lib.hideContext()
+                        
+                        -- Visual feedback
+                        lib.notify({
+                            title = '📦 Starting Team Delivery',
+                            description = 'Accepting order for your team...',
+                            type = 'info',
+                            duration = 5000,
+                            position = Config.UI.notificationPosition
+                        })
+                        
+                        -- Trigger server event
+                        TriggerServerEvent('supply:teams:acceptOrder', teamId)
+                    end
+                end)
             end
+        })
+    elseif isLeader and not allMembersReady then
+        -- Show waiting message for leader
+        table.insert(options, 4, {
+            title = '⏳ Waiting for Team',
+            description = 'All members must be ready before starting',
+            icon = 'fas fa-hourglass-half',
+            iconColor = '#FFA726',
+            disabled = true
+        })
+    elseif not isLeader and allMembersReady then
+        -- Show waiting message for members
+        table.insert(options, 4, {
+            title = '⏳ Waiting for Leader',
+            description = 'Team leader will start the delivery',
+            icon = 'fas fa-hourglass-half',
+            iconColor = '#03A9F4',
+            disabled = true
         })
     end
     
+    -- Performance tracking
     table.insert(options, {
         title = "🏆 Team Leaderboard",
         description = "Check team rankings and challenges",
@@ -300,19 +355,47 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
         end
     })
     
+    -- Communication helper
+    table.insert(options, {
+        title = "💬 Team Communication",
+        description = "Tips for better coordination",
+        icon = "fas fa-comments",
+        onSelect = function()
+            lib.notify({
+                title = "💬 Communication Tips",
+                description = [[
+**Voice Chat:**
+• Use /teamspeak or Discord
+• Count down before leaving
+• Call out your position
+
+**Text Chat:**
+• /team [message] for team chat
+• Use quick callouts
+• Coordinate parking spots]],
+                type = "info",
+                duration = 12000,
+                position = Config.UI.notificationPosition,
+                markdown = true
+            })
+        end
+    })
+    
+    -- Leave team option
     table.insert(options, {
         title = "🚪 Leave Team",
         description = "Exit and find another team",
         icon = "fas fa-door-open",
+        iconColor = "#F44336",
         onSelect = function()
             lib.alertDialog({
                 header = "Leave Team?",
-                content = "Are you sure you want to leave this team?",
+                content = "Are you sure you want to leave this team? You'll need to join or create a new one.",
                 centered = true,
                 cancel = true,
                 labels = {
                     cancel = "Stay",
-                    confirm = "Leave"
+                    confirm = "Leave Team"
                 }
             }, function(response)
                 if response == "confirm" then
@@ -320,6 +403,14 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
                     isReady = false
                     allMembersReady = false
                     TriggerServerEvent("team:leaveDelivery", teamId)
+                    
+                    lib.notify({
+                        title = "👥 Left Team",
+                        description = "You have left the delivery team",
+                        type = "info",
+                        duration = 5000,
+                        position = Config.UI.notificationPosition
+                    })
                 end
             end)
         end
@@ -327,7 +418,7 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
     
     lib.registerContext({
         id = "team_recruitment",
-        title = "🚛 Team Coordination",
+        title = "🚛 Team Coordination Hub",
         options = options
     })
     lib.showContext("team_recruitment")
@@ -390,6 +481,374 @@ AddEventHandler("team:showTeamStatus", function(teamData)
         options = options
     })
     lib.showContext("team_status")
+end)
+
+-- Main Team Delivery Menu
+RegisterNetEvent("warehouse:openTeamMenu")
+AddEventHandler("warehouse:openTeamMenu", function(warehouseId)
+    currentWarehouseId = warehouseId -- Store it!
+    local options = {
+        {
+            title = "🚛 Create Team Delivery",
+            description = "Start a new team for large orders (5+ boxes)",
+            icon = "fas fa-plus-circle",
+            metadata = {
+                ["Requirements"] = "5+ box orders",
+                ["Team Size"] = "2-8 players",
+                ["Bonus"] = "Up to 2.0x multiplier"
+            },
+            onSelect = function()
+                -- Get orders that qualify for team delivery
+                TriggerServerEvent("warehouse:getPendingOrdersForTeam")
+            end
+        },
+        {
+            title = "👀 Browse Available Teams",
+            description = "See teams currently recruiting drivers",
+            icon = "fas fa-search",
+            onSelect = function()
+                TriggerServerEvent("team:getAvailableTeams")
+            end
+        },
+        {
+            title = "🆔 Join Team by ID",
+            description = "Enter a specific team ID to join",
+            icon = "fas fa-keyboard",
+            onSelect = function()
+                local input = lib.inputDialog("Join Team", {
+                    { 
+                        type = "input", 
+                        label = "Team ID", 
+                        placeholder = "Enter team ID (e.g., team_1234)", 
+                        required = true,
+                        min = 10,
+                        max = 20
+                    }
+                })
+                if input and input[1] then
+                    TriggerServerEvent("team:joinDelivery", input[1])
+                end
+            end
+        },
+        {
+            title = "🏆 Team Leaderboards",
+            description = "View top performing delivery teams",
+            icon = "fas fa-trophy",
+            metadata = {
+                ["Categories"] = "Daily, Weekly, All-Time",
+                ["Metrics"] = "Deliveries, Sync Bonus, Earnings"
+            },
+            onSelect = function()
+                TriggerEvent("team:openLeaderboardMenu")
+            end
+        },
+        {
+            title = "📊 My Team Stats",
+            description = "View your team delivery performance",
+            icon = "fas fa-chart-line",
+            onSelect = function()
+                TriggerServerEvent("team:getPersonalTeamStats")
+            end
+        },
+        {
+            title = "💡 Team Strategies",
+            description = "Learn coordination tips and tricks",
+            icon = "fas fa-lightbulb",
+            onSelect = function()
+                TriggerEvent("team:showPerformanceTips")
+            end
+        },
+        {
+            title = "👥 Recent Teams",
+            description = "Rejoin teams you've worked with before",
+            icon = "fas fa-history",
+            onSelect = function()
+                TriggerServerEvent("team:checkPersistentTeam")
+            end
+        },
+        {
+            title = "← Back to Main Menu",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openMainMenu", warehouseId)
+            end
+        }
+    }
+    
+    lib.registerContext({
+        id = "team_delivery_menu",
+        title = "👥 Team Delivery System",
+        options = options
+    })
+    lib.showContext("team_delivery_menu")
+end)
+
+-- Team Performance Tips
+RegisterNetEvent("team:showPerformanceTips")
+AddEventHandler("team:showPerformanceTips", function()
+    local options = {
+        {
+            title = "🎯 Perfect Sync Strategy",
+            description = "Arrive within 15 seconds for maximum bonus",
+            icon = "fas fa-sync",
+            onSelect = function()
+                lib.notify({
+                    title = "🎯 Perfect Sync Tips",
+                    description = [[
+**Coordination is KEY!**
+• Use voice chat or text
+• Count down before leaving
+• Follow the same route
+• Park together at delivery
+
+**Requirements:**
+✅ All arrive within 15s
+✅ No vehicle damage
+✅ Complete all boxes
+
+**Reward:** +$1000 bonus!]],
+                    type = "info",
+                    duration = 15000,
+                    position = Config.UI.notificationPosition,
+                    markdown = true
+                })
+            end
+        },
+        {
+            title = "🚛 Vehicle Convoy Tips",
+            description = "How to drive as a team effectively",
+            icon = "fas fa-truck",
+            onSelect = function()
+                lib.notify({
+                    title = "🚛 Convoy Driving",
+                    description = [[
+**Formation Tips:**
+• Leader sets the pace
+• Maintain 2-3 car gap
+• Use hazards for stops
+• Wait at intersections
+
+**Communication:**
+• Call out turns early
+• Warn about obstacles
+• Coordinate parking]],
+                    type = "info",
+                    duration = 12000,
+                    position = Config.UI.notificationPosition,
+                    markdown = true
+                })
+            end
+        },
+        {
+            title = "💰 Maximizing Team Earnings",
+            description = "Get the most from team deliveries",
+            icon = "fas fa-dollar-sign",
+            onSelect = function()
+                lib.notify({
+                    title = "💰 Team Earnings Guide",
+                    description = [[
+**Team Size Bonuses:**
+👥 2 players: 1.2x
+👥 3-4 players: 1.5x
+👥 5-6 players: 1.75x
+👥 7-8 players: 2.0x
+
+**Stack These Bonuses:**
+⚡ Speed bonus
+🎯 Perfect sync
+📦 Volume bonus
+🏆 No damage bonus]],
+                    type = "info",
+                    duration = 12000,
+                    position = Config.UI.notificationPosition,
+                    markdown = true
+                })
+            end
+        },
+        {
+            title = "🎭 Role Strategies",
+            description = "Leader vs Member responsibilities",
+            icon = "fas fa-users-cog",
+            onSelect = function()
+                lib.notify({
+                    title = "🎭 Team Roles",
+                    description = [[
+**Team Leader:**
+• Creates delivery
+• Sets the pace
+• Coordinates team
+• Gets leader vehicle
+
+**Team Members:**
+• Follow leader's pace
+• Communicate issues
+• Help with navigation
+• Support the team]],
+                    type = "info",
+                    duration = 10000,
+                    position = Config.UI.notificationPosition,
+                    markdown = true
+                })
+            end
+        },
+        {
+            title = "← Back to Team Menu",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openTeamMenu")
+            end
+        }
+    }
+    
+    lib.registerContext({
+        id = "team_performance_tips",
+        title = "💡 Team Performance Guide",
+        options = options
+    })
+    lib.showContext("team_performance_tips")
+end)
+
+-- Personal Team Stats Display
+RegisterNetEvent("team:showPersonalStats")
+AddEventHandler("team:showPersonalStats", function(stats)
+    local options = {
+        {
+            title = "📊 Team Delivery Overview",
+            description = string.format(
+                "Total Team Deliveries: %d\nPerfect Syncs: %d\nTeam Earnings: $%s",
+                stats.team_deliveries or 0,
+                stats.perfect_syncs or 0,
+                string.format("%.0f", stats.team_earnings or 0)
+            ),
+            disabled = true
+        },
+        {
+            title = "🏆 Best Team Performance",
+            description = stats.best_team and string.format(
+                "Team: %s\nDeliveries Together: %d\nBest Sync Time: %ds",
+                stats.best_team.members,
+                stats.best_team.deliveries,
+                stats.best_team.sync_time
+            ) or "No team data yet",
+            disabled = true
+        },
+        {
+            title = "⚡ Sync Bonus Rate",
+            description = string.format(
+                "Perfect Syncs: %.1f%%\nAverage Sync Time: %ds\nTotal Sync Bonuses: $%d",
+                (stats.perfect_syncs / math.max(stats.team_deliveries, 1)) * 100,
+                stats.avg_sync_time or 0,
+                stats.total_sync_bonuses or 0
+            ),
+            disabled = true
+        },
+        {
+            title = "👥 Favorite Teammates",
+            description = "Players you work best with",
+            icon = "fas fa-user-friends",
+            onSelect = function()
+                if stats.favorite_teammates and #stats.favorite_teammates > 0 then
+                    local teammates = {}
+                    for _, teammate in ipairs(stats.favorite_teammates) do
+                        table.insert(teammates, string.format(
+                            "%s - %d deliveries",
+                            teammate.name,
+                            teammate.count
+                        ))
+                    end
+                    lib.notify({
+                        title = "👥 Favorite Teammates",
+                        description = table.concat(teammates, "\n"),
+                        type = "info",
+                        duration = 10000,
+                        position = Config.UI.notificationPosition
+                    })
+                else
+                    lib.notify({
+                        title = "No Data",
+                        description = "Complete team deliveries to see teammates",
+                        type = "info",
+                        duration = 5000,
+                        position = Config.UI.notificationPosition
+                    })
+                end
+            end
+        },
+        {
+            title = "← Back to Team Menu",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openTeamMenu")
+            end
+        }
+    }
+    
+    lib.registerContext({
+        id = "team_personal_stats",
+        title = "📊 My Team Performance",
+        options = options
+    })
+    lib.showContext("team_personal_stats")
+end)
+
+-- Recent Teams Display
+RegisterNetEvent("team:showRecentTeams")
+AddEventHandler("team:showRecentTeams", function(recentTeams)
+    local options = {
+        {
+            title = "🔄 Refresh",
+            description = "Check for online teammates",
+            icon = "fas fa-sync",
+            onSelect = function()
+                TriggerServerEvent("team:checkPersistentTeam")
+            end
+        }
+    }
+    
+    if #recentTeams == 0 then
+        table.insert(options, {
+            title = "No Recent Teams",
+            description = "Complete team deliveries to see history",
+            disabled = true
+        })
+    else
+        for _, team in ipairs(recentTeams) do
+            local onlineText = team.onlineCount > 1 and 
+                string.format("🟢 %d/%d online", team.onlineCount, #team.members) or
+                "🔴 Not enough online"
+            
+            table.insert(options, {
+                title = string.format("👥 %s", table.concat(team.memberNames, ", ")),
+                description = string.format(
+                    "%s\nDeliveries Together: %d\nLast Active: %s",
+                    onlineText,
+                    team.deliveryCount,
+                    team.lastActiveText
+                ),
+                disabled = team.onlineCount < 2,
+                onSelect = function()
+                    if team.onlineCount >= 2 then
+                        TriggerServerEvent("team:rejoinPersistentTeam", team.teamKey)
+                    end
+                end
+            })
+        end
+    end
+    
+    table.insert(options, {
+        title = "← Back to Team Menu",
+        icon = "fas fa-arrow-left",
+        onSelect = function()
+            TriggerEvent("warehouse:openTeamMenu")
+        end
+    })
+    
+    lib.registerContext({
+        id = "recent_teams_menu",
+        title = "👥 Recent Team History",
+        options = options
+    })
+    lib.showContext("recent_teams_menu")
 end)
 
 -- Show available teams to join
