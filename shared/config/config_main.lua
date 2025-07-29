@@ -8,7 +8,7 @@ Config.Notify = 'ox' -- ox_lib
 Config.Menu = 'ox' -- ox_lib
 
 Config.UI = {
-    notificationPosition = 'center-right',
+    notificationPosition = 'top-right',
     enableMarkdown = true,
     theme = 'default'
 }
@@ -521,6 +521,33 @@ Config.TeamDeliveries = {
         requireUniqueMembers = true,     -- Can't use alt accounts
         minDistanceForBonus = 500        -- Minimum distance for coordination bonus
     }
+}
+
+Config.ImportSystem = {
+    enabled = true,
+    
+    -- Import warehouse configuration
+    warehouseId = 2, -- Warehouse 2 becomes import center
+    
+    -- Import pricing
+    importMarkup = 0.25, -- 25% markup on import items
+    
+    -- Delivery settings
+    importDeliveryBonus = 0.15, -- 15% bonus for import deliveries
+    
+    -- Email notifications
+    notifications = {
+        arrivalAlerts = true,
+        delayAlerts = true,
+        shortageAlerts = true
+    },
+    
+    -- Order splitting
+    autoSplitOrders = true, -- Automatically split mixed orders
+    
+    -- Stock management
+    separateStockTracking = true,
+    importStockPrefix = "import_" -- Prefix for import stock items
 }
 
 Config.AchievementVehicles = {

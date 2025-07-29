@@ -1,5 +1,12 @@
 local QBCore = exports['qb-core']:GetCoreObject()
 
+local DEBUG_MODE = false -- Set to false when fixed
+
+local function debugPrint(source, stage, message)
+    if DEBUG_MODE then
+        print(string.format("^3[SERVER DEBUG - %s - Player %s]^0 %s", stage, source, message))
+    end
+end
 -- ===================================
 -- STOCK CACHE SYSTEM
 -- ===================================
@@ -7,6 +14,29 @@ local stockCache = {}
 local cacheExpiry = {}
 local CACHE_DURATION = 30000 -- 30 seconds in milliseconds
 
+local function getPlayerWarehouseLocation(source)
+    local ped = GetPlayerPed(source)
+    local coords = GetEntityCoords(ped)
+    
+    -- Check which warehouse the player is closest to
+    local closestWarehouse = 1
+    local closestDistance = 9999
+    
+    for warehouseId, warehouse in ipairs(Config.WarehousesLocation) do
+        local distance = #(coords - warehouse.position)
+        if distance < closestDistance then
+            closestDistance = distance
+            closestWarehouse = warehouseId
+        end
+    end
+    
+    -- Must be within 50 units of a warehouse
+    if closestDistance > 50 then
+        return nil
+    end
+    
+    return closestWarehouse
+end
 
 -- Cache helper functions
 local function isCacheValid(key)
@@ -79,7 +109,7 @@ local function calculateDeliveryInfo(orderGroup)
     }
 end
 
--- Get Pending Orders (MISSING IN CURRENT VERSION)
+-- Get Pending Orders
 RegisterNetEvent('warehouse:getPendingOrders')
 AddEventHandler('warehouse:getPendingOrders', function()
     local playerId = source
@@ -87,7 +117,30 @@ AddEventHandler('warehouse:getPendingOrders', function()
         return -- Silently reject unauthorized access
     end
     
-    MySQL.Async.fetchAll('SELECT * FROM supply_orders WHERE status = ?', { 'pending' }, function(results)
+    -- Determine which warehouse the player is at
+    local warehouseId = getPlayerWarehouseLocation(playerId)
+    if not warehouseId then
+        TriggerClientEvent('ox_lib:notify', playerId, {
+            title = 'Error',
+            description = 'You must be at a warehouse to view orders.',
+            type = 'error',
+            duration = 5000,
+            position = Config.UI.notificationPosition
+        })
+        return
+    end
+    
+    -- Build query based on warehouse location
+    local queryCondition = ""
+    if warehouseId == 2 then
+        -- Import warehouse - only show import orders
+        queryCondition = "WHERE status = 'pending' AND order_group_id LIKE 'import_%'"
+    else
+        -- Regular warehouse - exclude import orders
+        queryCondition = "WHERE status = 'pending' AND (order_group_id NOT LIKE 'import_%' OR order_group_id IS NULL)"
+    end
+    
+    MySQL.Async.fetchAll('SELECT * FROM supply_orders ' .. queryCondition, {}, function(results)
         if not results then
             print("[ERROR] No results from supply_orders query")
             return
@@ -100,28 +153,39 @@ AddEventHandler('warehouse:getPendingOrders', function()
             local restaurantJob = Config.Restaurants[order.restaurant_id] and Config.Restaurants[order.restaurant_id].job
             if restaurantJob then
                 local itemKey = order.ingredient:lower()
-                local item = (Config.Items[restaurantJob].Meats[itemKey] or Config.Items[restaurantJob].Vegetables[itemKey] or Config.Items[restaurantJob].Fruits[itemKey])
-                local itemLabel = itemNames[itemKey] and itemNames[itemKey].label or item and item.label or itemKey
-
-            if item then
-                local orderGroupId = order.order_group_id or tostring(order.id)
-                if not ordersByGroup[orderGroupId] then
-                    ordersByGroup[orderGroupId] = {
-                        orderGroupId = orderGroupId,
-                        id = order.id,
-                        ownerId = order.owner_id,
-                        restaurantId = order.restaurant_id,
-                        totalCost = 0,
-                        items = {}
-                    }
+                local item = nil
+                
+                -- Find item in categories
+                for category, categoryItems in pairs(Config.Items[restaurantJob]) do
+                    if categoryItems[itemKey] then
+                        item = categoryItems[itemKey]
+                        break
+                    end
                 end
-                table.insert(ordersByGroup[orderGroupId].items, {
-                    id = order.id,
-                    itemName = itemKey,        -- Keep internal name for logic
-                    itemLabel = itemLabel,     -- ADD THIS: proper display label
-                    quantity = order.quantity,
-                    totalCost = order.total_cost
-                })
+                
+                local itemLabel = itemNames[itemKey] and itemNames[itemKey].label or (item and item.label) or itemKey
+
+                if item then
+                    local orderGroupId = order.order_group_id or tostring(order.id)
+                    if not ordersByGroup[orderGroupId] then
+                        ordersByGroup[orderGroupId] = {
+                            orderGroupId = orderGroupId,
+                            id = order.id,
+                            ownerId = order.owner_id,
+                            restaurantId = order.restaurant_id,
+                            totalCost = 0,
+                            items = {},
+                            isImport = string.find(orderGroupId, "import_") ~= nil
+                        }
+                    end
+                    table.insert(ordersByGroup[orderGroupId].items, {
+                        id = order.id,
+                        itemName = itemKey,
+                        itemLabel = itemLabel,
+                        quantity = order.quantity,
+                        totalCost = order.total_cost,
+                        isImport = item.import or false
+                    })
                     ordersByGroup[orderGroupId].totalCost = ordersByGroup[orderGroupId].totalCost + order.total_cost
                 else
                     print("[ERROR] Item not found: ", itemKey, " for job: ", restaurantJob)
@@ -137,10 +201,45 @@ AddEventHandler('warehouse:getPendingOrders', function()
             local deliveryInfo = calculateDeliveryInfo(orderGroup)
             orderGroup.deliveryInfo = deliveryInfo
             
+            -- Add warehouse info
+            orderGroup.warehouseId = warehouseId
+            orderGroup.warehouseName = warehouseId == 2 and "Import Distribution Center" or "Main Warehouse"
+            
             table.insert(orders, orderGroup)
         end
         
+        -- Add warehouse info to client display
+        if #orders == 0 then
+            local warehouseName = warehouseId == 2 and "Import Distribution Center" or "Main Warehouse"
+            TriggerClientEvent('ox_lib:notify', playerId, {
+                title = 'No Orders',
+                description = 'No pending orders for ' .. warehouseName,
+                type = 'info',
+                duration = 5000,
+                position = Config.UI.notificationPosition
+            })
+        end
+        
         TriggerClientEvent('warehouse:showOrderDetails', playerId, orders)
+    end)
+end)
+
+-- Add new handler for import stock management
+RegisterNetEvent('warehouse:getImportStock')
+AddEventHandler('warehouse:getImportStock', function()
+    local src = source
+    if not hasWarehouseAccess(src) then
+        return
+    end
+    
+    MySQL.Async.fetchAll('SELECT * FROM supply_import_stock', {}, function(results)
+        local stock = {}
+        for _, item in ipairs(results) do
+            stock[item.ingredient:lower()] = item.quantity
+        end
+        
+        -- Send with import flag
+        TriggerClientEvent('restaurant:showStockDetails', src, stock, nil, true) -- true = isImportStock
     end)
 end)
 
@@ -149,7 +248,7 @@ RegisterNetEvent('warehouse:acceptOrder')
 AddEventHandler('warehouse:acceptOrder', function(orderGroupId, restaurantId)
     local workerId = source
     if not hasWarehouseAccess(workerId) then
-        return -- Silently reject unauthorized access
+        return
     end
     
     MySQL.Async.fetchAll('SELECT * FROM supply_orders WHERE order_group_id = ?', { orderGroupId }, function(orderResults)
@@ -183,10 +282,19 @@ AddEventHandler('warehouse:acceptOrder', function(orderGroupId, restaurantId)
         local orders = {}
         local queries = {}
         local itemNames = exports.ox_inventory:Items() or {}
+        local isImportOrder = string.find(orderGroupId, "import_") ~= nil
         
         for _, order in ipairs(orderResults) do
             local ingredient = order.ingredient:lower()
-            local itemData = (Config.Items[restaurantJob].Meats[ingredient] or Config.Items[restaurantJob].Vegetables[ingredient] or Config.Items[restaurantJob].Fruits[ingredient])
+            local itemData = nil
+            
+            -- Find item in categories
+            for category, categoryItems in pairs(Config.Items[restaurantJob]) do
+                if categoryItems[ingredient] then
+                    itemData = categoryItems[ingredient]
+                    break
+                end
+            end
             
             if not itemData then
                 print("[ERROR] Item not found for ingredient:", ingredient)
@@ -201,13 +309,23 @@ AddEventHandler('warehouse:acceptOrder', function(orderGroupId, restaurantId)
                 return
             end
 
-            -- Check warehouse stock
-            local stockResults = MySQL.Sync.fetchAll('SELECT quantity FROM supply_warehouse_stock WHERE ingredient = ?', { ingredient })
+            -- Check appropriate stock based on order type
+            local stockTable = isImportOrder and 'supply_import_stock' or 'supply_warehouse_stock'
+            local stockResults = MySQL.Sync.fetchAll('SELECT quantity FROM ' .. stockTable .. ' WHERE ingredient = ?', { ingredient })
+            
             if not stockResults or #stockResults == 0 or stockResults[1].quantity < order.quantity then
-                print("[ERROR] Insufficient stock for", ingredient, ":", stockResults[1] and stockResults[1].quantity or 0, "<", order.quantity)
+                local currentStock = stockResults[1] and stockResults[1].quantity or 0
+                print("[ERROR] Insufficient stock for", ingredient, ":", currentStock, "<", order.quantity)
+                
+                local stockType = isImportOrder and "import" or "warehouse"
                 TriggerClientEvent('ox_lib:notify', workerId, {
                     title = 'Insufficient Stock',
-                    description = 'Not enough stock for **' .. (itemNames[ingredient] and itemNames[ingredient].label or ingredient) .. '**',
+                    description = string.format('Not enough %s stock for **%s** (%d/%d)', 
+                        stockType, 
+                        itemNames[ingredient] and itemNames[ingredient].label or ingredient,
+                        currentStock,
+                        order.quantity
+                    ),
                     type = 'error',
                     duration = 10000,
                     position = Config.UI.notificationPosition,
@@ -223,11 +341,13 @@ AddEventHandler('warehouse:acceptOrder', function(orderGroupId, restaurantId)
                 itemName = ingredient,
                 quantity = order.quantity,
                 totalCost = order.total_cost,
-                restaurantId = order.restaurant_id
+                restaurantId = order.restaurant_id,
+                isImport = itemData.import or false
             })
 
+            -- Update appropriate stock table
             table.insert(queries, {
-                query = 'UPDATE supply_warehouse_stock SET quantity = quantity - ? WHERE ingredient = ?',
+                query = 'UPDATE ' .. stockTable .. ' SET quantity = quantity - ? WHERE ingredient = ?',
                 values = { order.quantity, ingredient }
             })
             table.insert(queries, {
@@ -238,10 +358,12 @@ AddEventHandler('warehouse:acceptOrder', function(orderGroupId, restaurantId)
 
         MySQL.Async.transaction(queries, function(success)
             if success then
-                clearStockCache() -- Clear cache when stock changes
+                clearStockCache()
                 TriggerClientEvent('warehouse:spawnVehicles', workerId, restaurantId, orders)
+                
+                local orderType = isImportOrder and "Import" or "Regular"
                 TriggerClientEvent('ox_lib:notify', workerId, {
-                    title = 'Order Accepted',
+                    title = orderType .. ' Order Accepted',
                     description = 'Delivery started! Prepare to load boxes.',
                     type = 'success',
                     duration = 10000,
@@ -297,9 +419,10 @@ end)
 RegisterNetEvent('update:stock')
 AddEventHandler('update:stock', function(restaurantId, orders)
     local src = source
+    debugPrint(src, "STOCK_1", "Received stock update request")
     
     if not Config.Restaurants then
-        print("[ERROR] Config.Restaurants not loaded in sv_warehouse.lua")
+        debugPrint(src, "STOCK_ERROR", "Config.Restaurants not loaded!")
         TriggerClientEvent('ox_lib:notify', src, {
             title = 'Error',
             description = 'Configuration not loaded.',
@@ -312,6 +435,7 @@ AddEventHandler('update:stock', function(restaurantId, orders)
     end
     
     if not restaurantId or not orders or #orders == 0 then
+        debugPrint(src, "STOCK_ERROR", "Invalid restaurant ID or order data")
         TriggerClientEvent('ox_lib:notify', src, {
             title = 'Error',
             description = 'Invalid restaurant ID or order data.',
@@ -323,15 +447,21 @@ AddEventHandler('update:stock', function(restaurantId, orders)
         return
     end
 
+    debugPrint(src, "STOCK_2", "Processing " .. #orders .. " orders for restaurant " .. restaurantId)
+
     local orderGroupId = orders[1].orderGroupId
     local queries = {}
     local totalCost = 0
     local stashId = "restaurant_stock_" .. tostring(restaurantId)
     
-    for _, order in ipairs(orders) do
+    debugPrint(src, "STOCK_3", "Order group ID: " .. (orderGroupId or "nil"))
+    
+    for i, order in ipairs(orders) do
         local ingredient = order.itemName:lower()
         local quantity = tonumber(order.quantity)
         local orderCost = order.totalCost or 0
+        
+        debugPrint(src, "STOCK_4", "Processing item " .. i .. ": " .. ingredient .. " x" .. quantity)
         
         if ingredient and quantity then
             table.insert(queries, {
@@ -346,13 +476,20 @@ AddEventHandler('update:stock', function(restaurantId, orders)
             exports.ox_inventory:AddItem(stashId, ingredient, quantity)
             totalCost = totalCost + orderCost
         else
-            print("[ERROR] Invalid order data: ingredient or quantity is nil for order ID:", order.id)
+            debugPrint(src, "STOCK_ERROR", "Invalid order data for order ID: " .. (order.id or "nil"))
         end
     end
 
+    debugPrint(src, "STOCK_5", "Executing " .. #queries .. " queries...")
+
     MySQL.Async.transaction(queries, function(success)
+        debugPrint(src, "STOCK_6", "Transaction result: " .. tostring(success))
+        
         if success then
-            clearStockCache() -- Clear cache when stock changes
+            clearStockCache()
+            
+            debugPrint(src, "STOCK_7", "Sending success notification")
+            
             TriggerClientEvent('ox_lib:notify', src, {
                 title = 'Stock Updated',
                 description = 'Orders completed and stock updated!',
@@ -362,14 +499,17 @@ AddEventHandler('update:stock', function(restaurantId, orders)
                 markdown = Config.UI.enableMarkdown
             })
             
-            
+            debugPrint(src, "STOCK_8", "Triggering delivery:storeCompletionData")
             
             TriggerClientEvent('delivery:storeCompletionData', src, {
                 restaurantId = restaurantId,
                 orders = orders,
                 totalCost = totalCost
             })
+            
+            debugPrint(src, "STOCK_9", "Stock update complete!")
         else
+            debugPrint(src, "STOCK_ERROR", "Transaction failed!")
             TriggerClientEvent('ox_lib:notify', src, {
                 title = 'Error',
                 description = 'Failed to update stock.',
@@ -382,174 +522,124 @@ AddEventHandler('update:stock', function(restaurantId, orders)
     end)
 end)
 
--- Get Warehouse Stock
-RegisterNetEvent("warehouse:getStocks")
-AddEventHandler("warehouse:getStocks", function()
-    local src = source
-    if not hasWarehouseAccess(src) then
-        return -- Silently reject unauthorized access
-    end
-    local playerId = source
-    
-    MySQL.Async.fetchAll('SELECT * FROM supply_warehouse_stock', {}, function(results)
-        local stock = {}
-        for _, item in ipairs(results) do
-            stock[item.ingredient:lower()] = item.quantity
-        end
-        TriggerClientEvent('restaurant:showStockDetails', playerId, stock)
-    end)
-end)
-
--- Get Warehouse Stock for Ordering
-RegisterNetEvent("warehouse:getStocksForOrder")
-AddEventHandler("warehouse:getStocksForOrder", function(restaurantId)
-    local src = source
-    
-    if not Config.Restaurants then
-        print("[ERROR] Config.Restaurants not loaded in sv_warehouse.lua")
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = "Error",
-            description = "Configuration not loaded.",
-            type = "error",
-            duration = 10000,
-            position = Config.UI.notificationPosition,
-            markdown = Config.UI.enableMarkdown
-        })
-        return
-    end
-    
-    -- Simplified restaurant ID validation
-    local restaurantData = Config.Restaurants[restaurantId] or Config.Restaurants[tostring(restaurantId)] or Config.Restaurants[tonumber(restaurantId)]
-    if not restaurantData then
-        print("[ERROR] Restaurant not found with ID:", restaurantId)
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = "Error",
-            description = "Invalid restaurant ID: " .. tostring(restaurantId),
-            type = "error",
-            duration = 10000,
-            position = Config.UI.notificationPosition,
-            markdown = Config.UI.enableMarkdown
-        })
-        return
-    end
-
-    local restaurantJob = restaurantData.job
-    
-    -- print("[DEBUG] Original ID:", restaurantId, "Type:", type(restaurantId))
-    -- print("[DEBUG] Using ID:", actualRestaurantId, "Type:", type(actualRestaurantId))
-    
-    if not Config.Restaurants[restaurantId] then
-        print("[ERROR] Restaurant not found with any ID variant")
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = "Error",
-            description = "Invalid restaurant ID: " .. tostring(restaurantId),
-            type = "error",
-            duration = 10000,
-            position = Config.UI.notificationPosition,
-            markdown = Config.UI.enableMarkdown
-        })
-        return
-    end
-
-    local stock = {}
-    local dynamicPrices = {}
-
-    -- Get warehouse stock (NOT restaurant stock) - WITH CACHING
-    local cacheKey = "warehouse_stock_all"
-    local cachedStock = getCache(cacheKey)
-
-    if cachedStock then
-        print("[CACHE HIT] Using cached warehouse stock data")
-        stock = cachedStock
-    else
-        local result = MySQL.query.await('SELECT ingredient, quantity FROM supply_warehouse_stock')
-        if result then
-            for _, row in ipairs(result) do
-                stock[row.ingredient] = row.quantity or 0
-            end
-        end
-        setCache(cacheKey, stock)
-        print("[CACHE SET] Warehouse stock cached")
-    end
-
-    local restaurantJob = Config.Restaurants[restaurantId].job
-    if not restaurantJob or not Config.Items[restaurantJob] then
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = "Error",
-            description = "Restaurant job or items not found.",
-            type = "error",
-            duration = 10000,
-            position = Config.UI.notificationPosition,
-            markdown = Config.UI.enableMarkdown
-        })
-        return
-    end
-
-    local items = Config.Items[restaurantJob]
-    for category, categoryItems in pairs(items) do
-        for item, details in pairs(categoryItems) do
-            dynamicPrices[item] = details.price or 0
-        end
-    end
-
-    -- print("[DEBUG] Sending back to client with restaurant ID:", actualRestaurantId)
-    TriggerClientEvent("restaurant:openOrderMenu", src, { 
-        restaurantId = restaurantId, 
-        warehouseStock = stock, 
-        dynamicPrices = dynamicPrices 
-    })
-end)
-
 RegisterNetEvent('delivery:requestPayment')
 AddEventHandler('delivery:requestPayment', function(deliveryData)
     local src = source
+    debugPrint(src, "PAYMENT_1", "Payment request received")
+    
     local xPlayer = QBCore.Functions.GetPlayer(src)
     
-    if not xPlayer or not deliveryData then
-        print("[ERROR] Invalid payment request")
+    if not xPlayer then
+        debugPrint(src, "PAYMENT_ERROR", "Player not found!")
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Payment Error',
+            description = 'Unable to process payment. Please contact admin.',
+            type = 'error',
+            duration = 10000,
+            position = Config.UI.notificationPosition
+        })
         return
     end
     
-    -- Calculate base pay
-    local basePay = math.floor(deliveryData.totalCost * Config.DriverPayPrec)
-    
-    -- Calculate total boxes
-    local totalBoxes = 0
-    for _, order in ipairs(deliveryData.orders) do
-        local totalItems = 0
-        if order.items then
-            for _, item in ipairs(order.items) do
-                totalItems = totalItems + item.quantity
-            end
-        else
-            totalItems = order.quantity or 0
-        end
-        
-        local itemsPerContainer = (Config.ContainerSystem and Config.ContainerSystem.itemsPerContainer) or 12
-        local containersPerBox = (Config.ContainerSystem and Config.ContainerSystem.containersPerBox) or 5
-        local containersNeeded = math.ceil(totalItems / itemsPerContainer)
-        local boxesNeeded = math.ceil(containersNeeded / containersPerBox)
-        totalBoxes = totalBoxes + boxesNeeded
+    if not deliveryData then
+        debugPrint(src, "PAYMENT_ERROR", "No delivery data provided!")
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Payment Error',
+            description = 'No delivery data found.',
+            type = 'error',
+            duration = 10000,
+            position = Config.UI.notificationPosition
+        })
+        return
     end
     
-    -- Now trigger the reward calculation
-    TriggerEvent('rewards:calculateDeliveryReward', src, {
-        basePay = basePay,
-        deliveryTime = deliveryData.deliveryTime,
-        boxes = totalBoxes,
-        orderGroupId = deliveryData.orders[1].orderGroupId,
-        totalCost = deliveryData.totalCost,
-        isPerfect = deliveryData.deliveryTime < 1200,
-        restaurantId = deliveryData.restaurantId
-    })
+    debugPrint(src, "PAYMENT_2", "Processing payment for delivery time: " .. (deliveryData.deliveryTime or "nil"))
     
-    -- Also trigger leaderboard tracking
-    TriggerEvent('leaderboard:trackDelivery', src, {
-        boxes = totalBoxes,
-        deliveryTime = deliveryData.deliveryTime,
-        earnings = basePay,
-        isPerfect = deliveryData.deliveryTime < 1200
-    })
+    -- Wrap in pcall to catch any errors
+    local success, err = pcall(function()
+        -- Calculate base pay
+        local basePay = math.floor(deliveryData.totalCost * Config.DriverPayPrec)
+        debugPrint(src, "PAYMENT_3", "Base pay calculated: $" .. basePay)
+        
+        -- Calculate total boxes
+        local totalBoxes = 0
+        for _, order in ipairs(deliveryData.orders) do
+            local totalItems = 0
+            if order.items then
+                for _, item in ipairs(order.items) do
+                    totalItems = totalItems + item.quantity
+                end
+            else
+                totalItems = order.quantity or 0
+            end
+            
+            local itemsPerContainer = (Config.ContainerSystem and Config.ContainerSystem.itemsPerContainer) or 12
+            local containersPerBox = (Config.ContainerSystem and Config.ContainerSystem.containersPerBox) or 5
+            local containersNeeded = math.ceil(totalItems / itemsPerContainer)
+            local boxesNeeded = math.ceil(containersNeeded / containersPerBox)
+            totalBoxes = totalBoxes + boxesNeeded
+        end
+        
+        debugPrint(src, "PAYMENT_4", "Total boxes calculated: " .. totalBoxes)
+        
+        -- Give basic payment immediately to prevent freeze
+        xPlayer.Functions.AddMoney('cash', basePay, "Delivery base payment")
+        
+        debugPrint(src, "PAYMENT_5", "Base payment added to cash")
+        
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Payment Received',
+            description = 'Base payment of $' .. basePay .. ' added to your account!',
+            type = 'success',
+            duration = 10000,
+            position = Config.UI.notificationPosition
+        })
+        
+        -- Trigger reward calculation in separate thread to prevent blocking
+        Citizen.CreateThread(function()
+            debugPrint(src, "PAYMENT_6", "Triggering reward calculation in thread")
+            
+            TriggerEvent('rewards:calculateDeliveryReward', src, {
+                basePay = basePay,
+                deliveryTime = deliveryData.deliveryTime,
+                boxes = totalBoxes,
+                orderGroupId = deliveryData.orders[1].orderGroupId,
+                totalCost = deliveryData.totalCost,
+                isPerfect = deliveryData.deliveryTime < 1200,
+                restaurantId = deliveryData.restaurantId
+            })
+        end)
+        
+        -- Trigger leaderboard tracking in separate thread
+        Citizen.CreateThread(function()
+            debugPrint(src, "PAYMENT_7", "Triggering leaderboard tracking in thread")
+            
+            TriggerEvent('leaderboard:trackDelivery', src, {
+                boxes = totalBoxes,
+                deliveryTime = deliveryData.deliveryTime,
+                earnings = basePay,
+                isPerfect = deliveryData.deliveryTime < 1200
+            })
+        end)
+        
+        debugPrint(src, "PAYMENT_8", "Payment processing complete!")
+    end)
+    
+    if not success then
+        debugPrint(src, "PAYMENT_CRITICAL_ERROR", "Payment processing failed: " .. tostring(err))
+        
+        -- Emergency fallback payment
+        local fallbackPay = 500
+        xPlayer.Functions.AddMoney('cash', fallbackPay, "Delivery payment (fallback)")
+        
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Payment Processed',
+            description = 'Emergency payment of $' .. fallbackPay .. ' added.',
+            type = 'warning',
+            duration = 10000,
+            position = Config.UI.notificationPosition
+        })
+    end
 end)
 
 -- Get pending orders filtered for team delivery eligibility
@@ -596,5 +686,142 @@ AddEventHandler("warehouse:getPendingOrdersForTeam", function()
         
         -- Send all orders to client - client will filter for team eligibility
         TriggerClientEvent("warehouse:showTeamOrderDetails", src, orderGroups)
+    end)
+end)
+
+-- ===================================
+-- IMPORT TRACKING HANDLERS
+-- ===================================
+
+-- Get incoming import shipments
+RegisterNetEvent('imports:getIncomingShipments')
+AddEventHandler('imports:getIncomingShipments', function()
+    local src = source
+    if not hasWarehouseAccess(src) then
+        return
+    end
+    
+    MySQL.Async.fetchAll([[
+        SELECT * FROM supply_import_orders 
+        WHERE status IN ('ordered', 'in_transit') 
+        ORDER BY arrival_date ASC
+    ]], {}, function(results)
+        local shipments = {}
+        local itemNames = exports.ox_inventory:Items() or {}
+        
+        for _, shipment in ipairs(results) do
+            local itemLabel = itemNames[shipment.ingredient] and itemNames[shipment.ingredient].label or shipment.ingredient
+            table.insert(shipments, {
+                order_id = shipment.order_id,
+                item = itemLabel,
+                quantity = shipment.quantity,
+                origin = shipment.origin_country,
+                arrival = shipment.arrival_date,
+                status = shipment.status
+            })
+        end
+        
+        TriggerClientEvent('imports:showIncomingShipments', src, shipments)
+    end)
+end)
+
+-- Get import analytics
+RegisterNetEvent('imports:getAnalytics')
+AddEventHandler('imports:getAnalytics', function()
+    local src = source
+    if not hasWarehouseAccess(src) then
+        return
+    end
+    
+    -- Get import statistics
+    MySQL.Async.fetchAll([[
+        SELECT 
+            ingredient,
+            COUNT(*) as total_orders,
+            SUM(quantity) as total_quantity,
+            AVG(quantity) as avg_quantity,
+            MAX(arrival_date) as last_import
+        FROM supply_import_orders
+        WHERE status = 'distributed'
+        GROUP BY ingredient
+    ]], {}, function(results)
+        local analytics = {}
+        local itemNames = exports.ox_inventory:Items() or {}
+        
+        for _, stat in ipairs(results) do
+            local itemLabel = itemNames[stat.ingredient] and itemNames[stat.ingredient].label or stat.ingredient
+            table.insert(analytics, {
+                item = itemLabel,
+                total_orders = stat.total_orders,
+                total_quantity = stat.total_quantity,
+                avg_quantity = math.floor(stat.avg_quantity),
+                last_import = stat.last_import
+            })
+        end
+        
+        TriggerClientEvent('imports:showAnalytics', src, analytics)
+    end)
+end)
+
+-- ===================================
+-- STOCK ALERTS HANDLER
+-- ===================================
+
+RegisterNetEvent('stockalerts:getAlerts')
+AddEventHandler('stockalerts:getAlerts', function()
+    local src = source
+    if not hasWarehouseAccess(src) then
+        return
+    end
+    
+    -- Get current stock levels and check for alerts
+    MySQL.Async.fetchAll([[
+        SELECT 
+            ws.ingredient,
+            ws.quantity as warehouse_stock,
+            COALESCE(ms.max_stock, 500) as max_stock,
+            COALESCE(ims.quantity, 0) as import_stock
+        FROM supply_warehouse_stock ws
+        LEFT JOIN supply_market_settings ms ON ws.ingredient = ms.ingredient
+        LEFT JOIN supply_import_stock ims ON ws.ingredient = ims.ingredient
+        WHERE (ws.quantity / COALESCE(ms.max_stock, 500) * 100) <= 50
+        OR COALESCE(ims.quantity, 0) < 100
+    ]], {}, function(results)
+        local alerts = {}
+        local itemNames = exports.ox_inventory:Items() or {}
+        
+        for _, item in ipairs(results) do
+            local itemLabel = itemNames[item.ingredient] and itemNames[item.ingredient].label or item.ingredient
+            local percentage = (item.warehouse_stock / item.max_stock) * 100
+            
+            local alertLevel = "moderate"
+            if percentage <= 5 then
+                alertLevel = "critical"
+            elseif percentage <= 20 then
+                alertLevel = "low"
+            end
+            
+            -- Check import stock separately
+            local importAlert = nil
+            if item.import_stock > 0 and item.import_stock < 100 then
+                importAlert = {
+                    level = item.import_stock < 25 and "critical" or "low",
+                    stock = item.import_stock
+                }
+            end
+            
+            table.insert(alerts, {
+                ingredient = item.ingredient,
+                label = itemLabel,
+                warehouse_stock = item.warehouse_stock,
+                import_stock = item.import_stock,
+                max_stock = item.max_stock,
+                percentage = percentage,
+                alert_level = alertLevel,
+                import_alert = importAlert
+            })
+        end
+        
+        TriggerClientEvent('stockalerts:showAlerts', src, alerts)
     end)
 end)

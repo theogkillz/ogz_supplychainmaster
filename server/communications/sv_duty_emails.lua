@@ -164,6 +164,215 @@ _Good luck and drive safely!_
     end)
 end
 
+local function sendDutySummaryEmailEnhanced(playerId)
+    print("[DUTY EMAIL DEBUG] Starting enhanced duty email for player:", playerId)
+    
+    local xPlayer = QBCore.Functions.GetPlayer(playerId)
+    if not xPlayer then return end
+    
+    -- Get regular orders
+    MySQL.Async.fetchAll([[
+        SELECT * FROM supply_orders 
+        WHERE status = 'pending' AND (order_group_id NOT LIKE 'import_%' OR order_group_id IS NULL)
+        ORDER BY created_at ASC
+    ]], {}, function(regularResults)
+        
+        -- Get import orders
+        MySQL.Async.fetchAll([[
+            SELECT * FROM supply_orders 
+            WHERE status = 'pending' AND order_group_id LIKE 'import_%'
+            ORDER BY created_at ASC
+        ]], {}, function(importResults)
+            
+            local regularCount = regularResults and #regularResults or 0
+            local importCount = importResults and #importResults or 0
+            local totalOrders = regularCount + importCount
+            
+            if totalOrders == 0 then
+                -- No orders email (existing logic)
+                local LBPhone = _G.LBPhone
+                if LBPhone then
+                    LBPhone.SendDutyEmail(playerId, {
+                        subject = "📋 Duty Report - No Pending Orders",
+                        message = "Welcome to your shift! There are currently no pending orders in the system."
+                    })
+                end
+                return
+            end
+            
+            -- Build enhanced duty report
+            local message = "📋 DUTY REPORT 📋\n\nWelcome to your shift!\n\n"
+            
+            if regularCount > 0 then
+                message = message .. string.format("🏭 MAIN WAREHOUSE: %d orders pending\n", regularCount)
+            end
+            
+            if importCount > 0 then
+                message = message .. string.format("🌍 IMPORT CENTER: %d import orders pending\n", importCount)
+            end
+            
+            message = message .. "\nHead to the appropriate warehouse to process orders!\n\n_Good luck and drive safely!_"
+            
+            local LBPhone = _G.LBPhone
+            if LBPhone then
+                LBPhone.SendDutyEmail(playerId, {
+                    subject = string.format("📋 Duty Report - %d Orders (%d Import)", totalOrders, importCount),
+                    message = message
+                })
+            end
+        end)
+    end)
+end
+
+-- Import arrival notification
+local function sendImportArrivalEmail(restaurantId, importItems)
+    print("[IMPORT EMAIL DEBUG] Sending import arrival notification for restaurant:", restaurantId)
+    
+    -- Get restaurant data
+    local restaurantData = Config.Restaurants[restaurantId]
+    if not restaurantData then return end
+    
+    local restaurantName = restaurantData.name
+    local restaurantJob = restaurantData.job
+    
+    -- Get all players with this restaurant job
+    local players = QBCore.Functions.GetPlayers()
+    local itemNames = exports.ox_inventory:Items() or {}
+    
+    -- Build item list
+    local itemList = ""
+    local totalValue = 0
+    
+    for _, item in ipairs(importItems) do
+        local itemLabel = itemNames[item.ingredient] and itemNames[item.ingredient].label or item.ingredient
+        itemList = itemList .. string.format("- %s x%d (Value: $%d)\n", itemLabel, item.quantity, item.total_cost)
+        totalValue = totalValue + item.total_cost
+    end
+    
+    -- Calculate import details
+    local itemsPerContainer = Config.ContainerSystem.itemsPerContainer or 12
+    local containersPerBox = Config.ContainerSystem.containersPerBox or 5
+    local totalItems = 0
+    
+    for _, item in ipairs(importItems) do
+        totalItems = totalItems + item.quantity
+    end
+    
+    local containersNeeded = math.ceil(totalItems / itemsPerContainer)
+    local boxesNeeded = math.ceil(containersNeeded / containersPerBox)
+    
+    -- Build email message
+    local message = string.format([[
+🌍 IMPORT DELIVERY ARRIVED! 🌍
+
+Your premium import items have arrived at the Import Distribution Center and are ready for delivery to %s!
+
+=== IMPORT MANIFEST ===
+%s
+📦 Total Boxes: %d
+💰 Total Value: $%d
+
+=== DELIVERY INSTRUCTIONS ===
+These are premium import items that require immediate delivery to maintain quality.
+
+A warehouse driver will deliver these items to your restaurant shortly. Please ensure someone is available to receive the delivery.
+
+_Import Distribution Center - Premium Global Ingredients_
+    ]], restaurantName, itemList, boxesNeeded, totalValue)
+    
+    -- Send to restaurant staff
+    for _, playerId in ipairs(players) do
+        local xPlayer = QBCore.Functions.GetPlayer(playerId)
+        if xPlayer and xPlayer.PlayerData.job.name == restaurantJob then
+            -- Send using LBPhone integration
+            local LBPhone = _G.LBPhone
+            if LBPhone then
+                LBPhone.SendDutyEmail(playerId, {
+                    subject = string.format("🌍 Import Delivery Ready - %d boxes", boxesNeeded),
+                    message = message
+                })
+            end
+            
+            -- Also send notification
+            TriggerClientEvent('ox_lib:notify', playerId, {
+                title = '🌍 Import Arrival',
+                description = string.format('Import delivery ready! %d boxes of premium ingredients', boxesNeeded),
+                type = 'success',
+                duration = 10000,
+                position = Config.UI.notificationPosition,
+                markdown = Config.UI.enableMarkdown
+            })
+        end
+    end
+    
+    -- Also notify warehouse workers about the import delivery job
+    sendImportDeliveryAlert(restaurantId, importItems, boxesNeeded)
+end
+
+-- Import delivery alert for warehouse workers
+local function sendImportDeliveryAlert(restaurantId, importItems, boxesNeeded)
+    local restaurantName = Config.Restaurants[restaurantId].name
+    local players = QBCore.Functions.GetPlayers()
+    
+    -- Calculate potential earnings with import bonus
+    local totalValue = 0
+    for _, item in ipairs(importItems) do
+        totalValue = totalValue + item.total_cost
+    end
+    
+    local basePay = math.floor(totalValue * Config.DriverPayPrec)
+    local importBonus = Config.ImportSystem and Config.ImportSystem.importDeliveryBonus or 1.15
+    local totalPay = math.floor(basePay * importBonus)
+    
+    local message = string.format([[
+🌍 IMPORT DELIVERY AVAILABLE! 🌍
+
+Premium import items need delivery from the Import Distribution Center!
+
+=== DELIVERY DETAILS ===
+📍 Destination: %s
+📦 Total Boxes: %d
+💰 Base Pay: $%d
+🌟 Import Bonus: +%d%% 
+💵 Total Potential: $%d+
+
+=== ITEMS ===
+Premium imported ingredients requiring careful handling.
+
+⚡ These are high-priority deliveries with bonus pay!
+
+Head to the Import Distribution Center to accept this delivery.
+    ]], restaurantName, boxesNeeded, basePay, 
+    math.floor((importBonus - 1) * 100), totalPay)
+    
+    -- Send to all warehouse workers
+    for _, playerId in ipairs(players) do
+        local xPlayer = QBCore.Functions.GetPlayer(playerId)
+        if xPlayer then
+            local playerJob = xPlayer.PlayerData.job.name
+            
+            -- Check if player has warehouse access
+            local hasAccess = false
+            for _, job in ipairs(Config.Jobs.warehouse) do
+                if playerJob == job then
+                    hasAccess = true
+                    break
+                end
+            end
+            
+            if hasAccess then
+                local LBPhone = _G.LBPhone
+                if LBPhone then
+                    LBPhone.SendDutyEmail(playerId, {
+                        subject = string.format("🌍 Import Delivery - $%d+ (%d boxes)", totalPay, boxesNeeded),
+                        message = message
+                    })
+                end
+            end
+        end
+    end
+end
+
 -- Rest of the file remains the same but with debug improvements
 local playersOnDuty = {}
 
@@ -194,7 +403,7 @@ local function monitorDutyStatus()
                     if playerJob.onduty and not playersOnDuty[citizenid] then
                         playersOnDuty[citizenid] = true
                         -- Send duty email
-                        sendDutySummaryEmail(playerId)
+                        sendDutySummaryEmailEnhanced(playerId)
                         
                         print(string.format("[DUTY] %s (%s) went ON duty for %s", 
                             xPlayer.PlayerData.charinfo.firstname .. " " .. xPlayer.PlayerData.charinfo.lastname,
@@ -229,6 +438,20 @@ AddEventHandler('playerDropped', function()
     if xPlayer then
         playersOnDuty[xPlayer.PlayerData.citizenid] = nil
     end
+end)
+
+RegisterNetEvent('imports:notifyArrival')
+AddEventHandler('imports:notifyArrival', function(restaurantId, orderGroupId)
+    -- Get import items from the order
+    MySQL.Async.fetchAll([[
+        SELECT ingredient, quantity, total_cost 
+        FROM supply_orders 
+        WHERE order_group_id = ? AND status = 'completed'
+    ]], {orderGroupId}, function(results)
+        if results and #results > 0 then
+            sendImportArrivalEmail(restaurantId, results)
+        end
+    end)
 end)
 
 -- QBCore duty toggle event

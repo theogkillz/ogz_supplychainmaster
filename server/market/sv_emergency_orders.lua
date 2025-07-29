@@ -113,12 +113,16 @@ function createEmergencyOrder(restaurantId, ingredient, priority, stockData)
     -- Log emergency event
     MySQL.Async.execute([[
         INSERT INTO supply_emergency_orders (
-            restaurant_id, ingredient, priority_level, emergency_pay,
-            restaurant_stock, warehouse_stock, created_at, expires_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            restaurant_id, ingredient, priority_level, quantity_needed,
+            bonus_multiplier, timeout_minutes
+        ) VALUES (?, ?, ?, ?, ?, ?)
     ]], {
-        restaurantId, ingredient, priorityConfig.level, emergencyPay,
-        stockData.restaurantStock, stockData.warehouseStock, currentTime, currentTime + priorityConfig.timeout
+        restaurantId,           -- restaurant_id
+        ingredient,             -- ingredient
+        priority,               -- priority_level (emergency/urgent/critical)
+        quantityNeeded or 50,   -- quantity_needed
+        1.5,                    -- bonus_multiplier (default 1.5)
+        30                      -- timeout_minutes (30 min emergency)
     })
     
     print(string.format("[EMERGENCY] %s order created: %s for %s (Pay: $%d)", 

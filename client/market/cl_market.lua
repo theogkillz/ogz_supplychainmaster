@@ -3,7 +3,7 @@
 -- Config safety
 local Config = Config or {
     UI = {
-        notificationPosition = 'center-right',
+        notificationposition = 'top-right',
         enableMarkdown = true
     }
 }

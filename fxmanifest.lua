@@ -12,7 +12,7 @@ lua54 'yes'
 -- ===================================
 shared_scripts {
     '@ox_lib/init.lua',
-    '@lation_ui/init.lua',
+    -- '@lation_ui/init.lua',,
     
     -- Configuration Files (Order matters!)
     'shared/config/config_main.lua',           -- Main config FIRST

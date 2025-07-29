@@ -358,6 +358,22 @@ CREATE TABLE IF NOT EXISTS `supply_market_events` (
   KEY `idx_started_at` (`started_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
 
+ALTER TABLE `supply_market_events`
+    MODIFY COLUMN `event_type` enum('shortage','surplus','spike','crash','volatility') NOT NULL,
+    ADD COLUMN IF NOT EXISTS `trigger_condition` varchar(255) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `price_before` decimal(10,2) NOT NULL DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS `price_after` decimal(10,2) NOT NULL DEFAULT 0.00,
+    ADD COLUMN IF NOT EXISTS `multiplier_applied` decimal(6,3) NOT NULL DEFAULT 1.000,
+    ADD COLUMN IF NOT EXISTS `duration` int(11) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `stock_level_at_trigger` int(11) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `player_count_at_trigger` int(11) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS `started_at` int(11) NOT NULL DEFAULT UNIX_TIMESTAMP(),
+    ADD COLUMN IF NOT EXISTS `ended_at` int(11) DEFAULT NULL;
+
+ALTER TABLE `supply_team_members`
+    ADD COLUMN IF NOT EXISTS `team_id` VARCHAR(50) DEFAULT NULL AFTER `team_delivery_id`,
+    ADD INDEX IF NOT EXISTS `idx_team_id` (`team_id`);
+
 -- Demand analysis data
 CREATE TABLE IF NOT EXISTS `supply_demand_analysis` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -532,22 +548,6 @@ CREATE TABLE IF NOT EXISTS `supply_price_overrides` (
     INDEX `idx_override_until` (`override_until`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Market events log
-CREATE TABLE IF NOT EXISTS `supply_market_events` (
-    `id` INT(11) NOT NULL AUTO_INCREMENT,
-    `event_type` VARCHAR(50) NOT NULL,
-    `ingredients` TEXT DEFAULT NULL,
-    `multiplier` DECIMAL(4,2) DEFAULT 1.00,
-    `duration` INT(11) DEFAULT 3600,
-    `created_by` VARCHAR(50) DEFAULT NULL,
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `expires_at` DATETIME NOT NULL,
-    `active` BOOLEAN DEFAULT TRUE,
-    PRIMARY KEY (`id`),
-    INDEX `idx_active` (`active`),
-    INDEX `idx_expires_at` (`expires_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 -- System pause states
 CREATE TABLE IF NOT EXISTS `supply_system_states` (
     `id` INT(11) NOT NULL AUTO_INCREMENT,
@@ -577,4 +577,65 @@ ADD COLUMN IF NOT EXISTS `admin_notes` TEXT DEFAULT NULL;
 ALTER TABLE `supply_player_stats` 
 ADD COLUMN IF NOT EXISTS `admin_modified` BOOLEAN DEFAULT FALSE,
 ADD COLUMN IF NOT EXISTS `last_admin_action` VARCHAR(255) DEFAULT NULL;
+
+- Create import stock table (MISSING FROM ORIGINAL SQL!)
+CREATE TABLE IF NOT EXISTS `supply_import_stock` (
+    `id` INT(11) NOT NULL AUTO_INCREMENT,
+    `ingredient` VARCHAR(255) NOT NULL,
+    `quantity` INT(11) DEFAULT 0,
+    `last_restocked` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `min_stock_level` INT(11) DEFAULT 100,
+    `auto_restock` TINYINT(1) DEFAULT 1,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_ingredient` (`ingredient`),
+    INDEX `idx_quantity` (`quantity`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
+
+-- Insert initial import stock (example data)
+INSERT INTO `supply_import_stock` (`ingredient`, `quantity`, `min_stock_level`) VALUES
+('reign_lettuce', 500, 100)
+ON DUPLICATE KEY UPDATE ingredient = ingredient;
+
+-- Create import orders tracking table
+CREATE TABLE IF NOT EXISTS `supply_import_orders` (
+    `id` INT(11) NOT NULL AUTO_INCREMENT,
+    `order_id` VARCHAR(100) NOT NULL,
+    `ingredient` VARCHAR(255) NOT NULL,
+    `quantity` INT(11) NOT NULL,
+    `origin_country` VARCHAR(100) DEFAULT 'International',
+    `arrival_date` DATETIME DEFAULT NULL,
+    `status` ENUM('ordered', 'in_transit', 'arrived', 'distributed') DEFAULT 'ordered',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_arrival_date` (`arrival_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
+
+-- Import delivery logs
+CREATE TABLE IF NOT EXISTS `supply_import_delivery_logs` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `import_order_id` INT(11) NOT NULL,
+  `driver_citizenid` VARCHAR(50) NOT NULL,
+  `delivery_time` INT(11) NOT NULL,
+  `boxes_delivered` INT(11) NOT NULL,
+  `payout_amount` DECIMAL(10,2) NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_driver` (`driver_citizenid`),
+  FOREIGN KEY (`import_order_id`) REFERENCES `supply_import_orders`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
+
+-- Import notifications tracking
+CREATE TABLE IF NOT EXISTS `supply_import_notifications` (
+  `id` INT(11) NOT NULL AUTO_INCREMENT,
+  `restaurant_id` INT(11) NOT NULL,
+  `notification_type` ENUM('arrival','delay','shortage') NOT NULL,
+  `ingredient` VARCHAR(255) NOT NULL,
+  `quantity` INT(11) NOT NULL,
+  `sent_to` VARCHAR(50) NOT NULL,
+  `sent_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  INDEX `idx_restaurant` (`restaurant_id`),
+  INDEX `idx_sent_to` (`sent_to`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
 

@@ -4,6 +4,7 @@ local QBCore = exports['qb-core']:GetCoreObject()
 local currentTeam = nil
 local teamDeliveryData = nil
 local isReady = false
+local allMembersReady = false -- Track if all members are ready
 
 -- Shared delivery tracking (same as solo)
 local deliveryBoxesRemaining = 0
@@ -75,15 +76,6 @@ local function GetConvoySpawnPoint(warehouseId)
         basePos.w
     )
 end
-
--- Then UPDATE the existing team:spawnDeliveryVehicle event handler to use this function:
--- Replace the spawn position logic (around line 280-320) with:
-
-    -- Get convoy-safe spawn position
-    local spawnPos = GetConvoySpawnPoint(1) -- Use warehouse 1
-    
-    -- Spawn vehicle at convoy position
-    local van = CreateVehicle(vehicleModel, spawnPos.x, spawnPos.y, spawnPos.z, spawnPos.w, true, false)
 
 -- Enhanced warehouse order details to include team option
 RegisterNetEvent("warehouse:showOrderDetails")
@@ -227,10 +219,15 @@ AddEventHandler("team:showDeliveryTypeMenu", function(orderGroupId, restaurantId
     lib.showContext("team_delivery_types")
 end)
 
--- Show recruitment menu for team leader
+-- Show recruitment menu for team leader (FIXED WITH ACCEPT ORDER BUTTON)
 RegisterNetEvent("team:showRecruitmentMenu")
-AddEventHandler("team:showRecruitmentMenu", function(teamId)
+AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
     currentTeam = teamId
+    
+    -- Update allMembersReady if teamData provided
+    if teamData then
+        allMembersReady = teamData.allReady
+    end
     
     local options = {
         {
@@ -257,47 +254,76 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId)
                 Citizen.Wait(100)
                 TriggerEvent("team:showRecruitmentMenu", teamId)
             end
-        },
-        {
-            title = "🏆 Team Leaderboard",
-            description = "Check team rankings and challenges",
-            icon = "fas fa-trophy",
-            onSelect = function()
-                TriggerEvent("team:openLeaderboardMenu")
-            end
-        },
-        {
-            title = "📊 Performance Tips",
-            description = "Learn coordination strategies",
-            icon = "fas fa-chart-line",
-            onSelect = function()
-                TriggerEvent("team:showPerformanceTips")
-            end
-        },
-        {
-            title = "🚪 Leave Team",
-            description = "Exit and find another team",
-            icon = "fas fa-door-open",
-            onSelect = function()
-                lib.alertDialog({
-                    header = "Leave Team?",
-                    content = "Are you sure you want to leave this team?",
-                    centered = true,
-                    cancel = true,
-                    labels = {
-                        cancel = "Stay",
-                        confirm = "Leave"
-                    }
-                }, function(response)
-                    if response == "confirm" then
-                        currentTeam = nil
-                        isReady = false
-                        TriggerServerEvent("team:leaveDelivery", teamId)
-                    end
-                end)
-            end
         }
     }
+    
+    -- SESSION 38 FIX: Add Accept Team Order button when all members are ready
+    if allMembersReady and teamData and teamData.isLeader then
+        table.insert(options, 4, { -- Insert after ready button
+            title = '🚚 Accept Team Order',
+            description = 'Start delivery with your team (All members ready!)',
+            icon = 'truck-fast',
+            iconColor = '#4CAF50',
+            onSelect = function()
+                -- Close the menu
+                lib.hideContext()
+                
+                -- Notify team members
+                lib.notify({
+                    title = '📦 Team Delivery Starting',
+                    description = 'Your team is accepting the order!',
+                    type = 'success',
+                    duration = 5000
+                })
+                
+                -- Trigger server event to accept order
+                TriggerServerEvent('supply:teams:acceptOrder', teamId)
+            end
+        })
+    end
+    
+    table.insert(options, {
+        title = "🏆 Team Leaderboard",
+        description = "Check team rankings and challenges",
+        icon = "fas fa-trophy",
+        onSelect = function()
+            TriggerEvent("team:openLeaderboardMenu")
+        end
+    })
+    
+    table.insert(options, {
+        title = "📊 Performance Tips",
+        description = "Learn coordination strategies",
+        icon = "fas fa-chart-line",
+        onSelect = function()
+            TriggerEvent("team:showPerformanceTips")
+        end
+    })
+    
+    table.insert(options, {
+        title = "🚪 Leave Team",
+        description = "Exit and find another team",
+        icon = "fas fa-door-open",
+        onSelect = function()
+            lib.alertDialog({
+                header = "Leave Team?",
+                content = "Are you sure you want to leave this team?",
+                centered = true,
+                cancel = true,
+                labels = {
+                    cancel = "Stay",
+                    confirm = "Leave"
+                }
+            }, function(response)
+                if response == "confirm" then
+                    currentTeam = nil
+                    isReady = false
+                    allMembersReady = false
+                    TriggerServerEvent("team:leaveDelivery", teamId)
+                end
+            end)
+        end
+    })
     
     lib.registerContext({
         id = "team_recruitment",
@@ -444,19 +470,35 @@ AddEventHandler("team:updateMemberList", function(team)
     -- This can trigger notifications or update displays
 end)
 
--- Update ready status display
+-- Update ready status display (FIXED TO TRACK ALL READY STATE)
 RegisterNetEvent("team:updateReadyStatus")
-AddEventHandler("team:updateReadyStatus", function(teamId, readyCount, totalMembers, allReady)
+AddEventHandler("team:updateReadyStatus", function(teamId, readyCount, totalMembers, allReady, isLeader)
     if currentTeam == teamId then
+        allMembersReady = allReady -- Store the all ready state
+        
         if allReady and totalMembers >= 2 then
-            lib.notify({
-                title = "🚀 TEAM READY!",
-                description = "All team members ready! Starting delivery...",
-                type = "success",
-                duration = 8000,
-                position = Config.UI.notificationPosition,
-                markdown = Config.UI.enableMarkdown
-            })
+            if isLeader then
+                lib.notify({
+                    title = "🚀 TEAM READY!",
+                    description = "All team members ready! Click 'Accept Team Order' to start delivery!",
+                    type = "success",
+                    duration = 8000,
+                    position = Config.UI.notificationPosition,
+                    markdown = Config.UI.enableMarkdown
+                })
+                
+                -- Refresh menu to show accept button
+                TriggerServerEvent("team:getTeamData", teamId)
+            else
+                lib.notify({
+                    title = "🚀 TEAM READY!",
+                    description = "All team members ready! Waiting for leader to accept order...",
+                    type = "success",
+                    duration = 8000,
+                    position = Config.UI.notificationPosition,
+                    markdown = Config.UI.enableMarkdown
+                })
+            end
         else
             lib.notify({
                 title = "👥 Team Status",

@@ -8,7 +8,30 @@ Config.Items = {
             ["reign_packed_groundmeat"] = { label = "Ground Beef", price = 6, size = "medium_items" },
         },
         Vegetables = {
-            -- ["reign_lettuce"] = { label = "Lettuce", price = 2, size = "medium_items" },
+            ["reign_lettuce"] = { label = "Lettuce", price = 2, size = "small_items", import = true },
+            -- ["farm_tomatoes"] = { label = "Tomatoes", price = 3, size = "medium_items" },
+            -- ["farm_onions"] = { label = "Onions", price = 2, size = "small_items" }
+        },
+        Fruits = {
+            -- ["farm_apples"] = { label = "Apples", price = 4, size = "medium_items" },
+            -- ["farm_oranges"] = { label = "Oranges", price = 4, size = "medium_items" }
+        },
+        Dairy = {
+            -- ["dairy_milk"] = { label = "Milk", price = 3, size = "large_items" },
+            -- ["dairy_cheese"] = { label = "Cheese", price = 5, size = "medium_items" }
+        },
+        DryGoods = {
+            -- ["bakery_flour"] = { label = "Flour", price = 2, size = "medium_items" },
+            -- ["spice_salt"] = { label = "Salt", price = 1, size = "small_items" }
+        }
+    },
+    ["sandyburgershot"] = {
+        Meats = {
+            ["reign_packed_groundchicken"] = { label = "Ground Chicken", price = 6, size = "medium_items" },
+            ["reign_packed_groundmeat"] = { label = "Ground Beef", price = 6, size = "medium_items" },
+        },
+        Vegetables = {
+            ["reign_lettuce"] = { label = "Lettuce", price = 2, size = "small_items", import = true },
             -- ["farm_tomatoes"] = { label = "Tomatoes", price = 3, size = "medium_items" },
             -- ["farm_onions"] = { label = "Onions", price = 2, size = "small_items" }
         },

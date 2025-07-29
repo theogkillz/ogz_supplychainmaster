@@ -25,8 +25,9 @@ local function getPlayerAchievementTier(citizenid)
             COUNT(*) as total_deliveries,
             AVG(delivery_rating) as avg_rating,
             SUM(CASE WHEN team_delivery = 1 THEN 1 ELSE 0 END) as team_deliveries
-        FROM supply_delivery_logs 
-        WHERE citizenid = ? AND delivery_status = 'completed'
+        FROM supply_delivery_logs
+        WHERE citizenid = ? 
+            AND (delivery_status IS NULL OR delivery_status = 'completed')
     ]], {citizenid}, function(results)
         if results and results[1] then
             deliveryCount = results[1].total_deliveries or 0

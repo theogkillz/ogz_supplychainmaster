@@ -22,6 +22,26 @@ local function hasWarehouseAccess()
     return false
 end
 
+local function getCurrentWarehouse()
+    local playerCoords = GetEntityCoords(PlayerPedId())
+    local closestWarehouse = nil
+    local closestDistance = 9999
+    
+    for index, warehouse in ipairs(Config.WarehousesLocation) do
+        local distance = #(playerCoords - warehouse.position)
+        if distance < closestDistance then
+            closestDistance = distance
+            closestWarehouse = index
+        end
+    end
+    
+    if closestDistance > 50 then
+        return nil
+    end
+    
+    return closestWarehouse
+end
+
 -- Global Variables
 local orderGroupId = nil
 local cartContainerCount = 0
@@ -145,6 +165,24 @@ AddEventHandler("warehouse:openProcessingMenu", function()
         return
     end
     
+    -- Determine which warehouse we're at
+    local warehouseId = getCurrentWarehouse()
+    if not warehouseId then
+        lib.notify({
+            title = "Error",
+            description = "You must be at a warehouse to access this menu.",
+            type = "error",
+            duration = 5000,
+            position = Config.UI.notificationPosition,
+            markdown = Config.UI.enableMarkdown
+        })
+        return
+    end
+    
+    local warehouseName = Config.WarehousesLocation[warehouseId].name or 
+                         (warehouseId == 2 and "Import Distribution Center" or "Main Warehouse")
+    local warehouseIcon = warehouseId == 2 and "🌍" or "🏭"
+    
     local options = {
         { 
             title = "📦 View Orders", 
@@ -191,9 +229,21 @@ AddEventHandler("warehouse:openProcessingMenu", function()
             end
         },
     }
+    -- Add import-specific options
+    if warehouseId == 2 then
+        table.insert(options, 3, {
+            title = "🌍 Import Tracking",
+            description = "Track incoming import shipments",
+            icon = "fas fa-ship",
+            onSelect = function()
+                TriggerEvent("imports:openTrackingMenu")
+            end
+        })
+    end
+    
     lib.registerContext({
         id = "main_menu",
-        title = "🏢 Hurst Industries - Warehouse Operations",
+        title = warehouseIcon .. " " .. warehouseName .. " - Operations",
         options = options
     })
     lib.showContext("main_menu")
@@ -374,12 +424,17 @@ AddEventHandler("warehouse:showOrderDetails", function(orders)
         
         -- Create description with all items in the order
         local itemList = {}
+        local hasImports = false
         for _, item in ipairs(orderGroup.items) do
             local itemLabel = itemNames[item.itemName:lower()] and itemNames[item.itemName:lower()].label or item.itemName
+            if item.isImport then
+                itemLabel = "🌍 " .. itemLabel -- Add import indicator
+                hasImports = true
+            end
             table.insert(itemList, item.quantity .. "x " .. itemLabel)
         end
         
-        -- Determine order size label
+        -- Determine order size label with import indicator
         local sizeLabel = ""
         if boxesNeeded <= 3 then
             sizeLabel = "🟢 Small Order"
@@ -387,6 +442,10 @@ AddEventHandler("warehouse:showOrderDetails", function(orders)
             sizeLabel = "🟡 Medium Order"
         else
             sizeLabel = "🔴 Large Order"
+        end
+        
+        if hasImports then
+            sizeLabel = sizeLabel .. " (Import)"
         end
         
         table.insert(options, {
@@ -429,6 +488,51 @@ AddEventHandler("warehouse:showOrderDetails", function(orders)
         options = options
     })
     lib.showContext("order_menu")
+end)
+
+-- Add import tracking menu
+RegisterNetEvent("imports:openTrackingMenu")
+AddEventHandler("imports:openTrackingMenu", function()
+    local options = {
+        {
+            title = "📥 Incoming Shipments",
+            description = "View expected import deliveries",
+            icon = "fas fa-truck-loading",
+            onSelect = function()
+                TriggerServerEvent("imports:getIncomingShipments")
+            end
+        },
+        {
+            title = "📊 Import Analytics",
+            description = "View import trends and statistics",
+            icon = "fas fa-chart-bar",
+            onSelect = function()
+                TriggerServerEvent("imports:getAnalytics")
+            end
+        },
+        {
+            title = "🔔 Arrival Notifications",
+            description = "Configure import arrival alerts",
+            icon = "fas fa-bell",
+            onSelect = function()
+                TriggerEvent("imports:configureNotifications")
+            end
+        },
+        {
+            title = "← Back to Main Menu",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openProcessingMenu")
+            end
+        }
+    }
+    
+    lib.registerContext({
+        id = "import_tracking_menu",
+        title = "🌍 Import Distribution Tracking",
+        options = options
+    })
+    lib.showContext("import_tracking_menu")
 end)
 
 -- Warehouse Stock Display
@@ -497,9 +601,20 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
     
     print("[DEBUG] Delivery calculated:", boxesNeeded, "boxes,", containersNeeded, "containers for", totalItems, "items")
     
-    local warehouseConfig = Config.Warehouses[1]
+    -- IMPORT FIX: Determine which warehouse to use based on order type
+    local isImportOrder = false
+    local warehouseId = 1 -- Default to main warehouse
+    
+    -- Check if this is an import order
+    if orders[1] and orders[1].orderGroupId then
+        isImportOrder = string.find(orders[1].orderGroupId, "import_") ~= nil
+        warehouseId = isImportOrder and 2 or 1
+        print("[DEBUG] Order type:", isImportOrder and "IMPORT" or "REGULAR", "Using warehouse:", warehouseId)
+    end
+    
+    local warehouseConfig = Config.Warehouses[warehouseId]
     if not warehouseConfig then
-        print("[ERROR] No warehouse configuration found")
+        print("[ERROR] No warehouse configuration found for warehouse", warehouseId)
         lib.notify({
             title = "Error",
             description = "No warehouse configuration found.",
@@ -514,6 +629,8 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
     -- Dynamic delivery briefing based on order size
     local briefingText = ""
     local vehicleType = ""
+    local warehouseName = warehouseConfig.name or (warehouseId == 2 and "Import Distribution Center" or "Main Warehouse")
+    
     if boxesNeeded <= 3 then
         briefingText = "Small delivery: Load " .. boxesNeeded .. " box(es) with " .. containersNeeded .. " containers."
         vehicleType = "Standard Van"
@@ -525,6 +642,9 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
         vehicleType = "Heavy Truck"
     end
 
+    -- Add warehouse info to briefing
+    briefingText = briefingText .. "\n\n📍 Loading at: " .. warehouseName
+
     lib.alertDialog({
         header = "📦 New Delivery Job",
         content = briefingText .. "\n\nVehicle: " .. vehicleType,
@@ -532,7 +652,6 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
         cancel = true
     })
 
-    -- DoScreenFadeOut(2500)
     Citizen.Wait(2500)
 
     local playerPed = PlayerPedId()
@@ -560,23 +679,19 @@ AddEventHandler("warehouse:spawnVehicles", function(restaurantId, orders)
     TriggerEvent("vehiclekeys:client:SetOwner", vanPlate)
 
     deliveryStartTime = GetGameTimer()
-    currentDeliveryData = { orderGroupId = orderGroupId, restaurantId = restaurantId }
+    currentDeliveryData = { orderGroupId = orders[1].orderGroupId, restaurantId = restaurantId }
     
-    print("[DEBUG] Van spawned with entity ID:", van, "for", boxesNeeded, "boxes")
-
-    -- DoScreenFadeIn(2500)
+    print("[DEBUG] Van spawned with entity ID:", van, "for", boxesNeeded, "boxes at warehouse", warehouseId)
 
     lib.notify({
         title = "📦 " .. (boxesNeeded > 7 and "LARGE " or boxesNeeded > 3 and "MEDIUM " or "") .. "Delivery Ready",
-        description = boxesNeeded .. " boxes (" .. containersNeeded .. " containers) need loading",
+        description = boxesNeeded .. " boxes (" .. containersNeeded .. " containers) need loading at " .. warehouseName,
         type = "success",
         duration = 10000,
         position = Config.UI.notificationPosition,
         markdown = Config.UI.enableMarkdown
     })
 
-    -- SetEntityCoords(playerPed, warehouseConfig.vehicle.position.x + 2.0, warehouseConfig.vehicle.position.y, warehouseConfig.vehicle.position.z, false, false, false, true)
-    
     -- Use enhanced multi-box loading if more than 1 box needed
     if boxesNeeded > 1 then
         TriggerEvent("warehouse:loadMultipleBoxes", warehouseConfig, van, restaurantId, orders, boxesNeeded)
@@ -1481,6 +1596,21 @@ AddEventHandler("warehouse:completeDelivery", function(restaurantId, van, orders
     -- STOCK UPDATE HAPPENS IMMEDIATELY UPON DELIVERY COMPLETION
     TriggerServerEvent("update:stock", restaurantId, orders)
     
+    -- STORE THE DATA IMMEDIATELY HERE!
+    completedDeliveryData = {
+        restaurantId = restaurantId,
+        orders = orders,
+        totalCost = 0,
+        deliveryTime = totalDeliveryTime
+    }
+    
+    -- Calculate total cost
+    for _, order in ipairs(orders) do
+        completedDeliveryData.totalCost = completedDeliveryData.totalCost + (order.totalCost or 0)
+    end
+    
+    print("[DEBUG] Stored delivery data locally - Total cost: " .. completedDeliveryData.totalCost)
+    
     lib.notify({
         title = "🎉 All Boxes Delivered!",
         description = string.format("Successfully delivered all %d boxes! Stock updated immediately. Return the van to complete job.", totalDeliveryBoxes),
@@ -1493,25 +1623,42 @@ AddEventHandler("warehouse:completeDelivery", function(restaurantId, van, orders
     TriggerEvent("warehouse:returnTruck", van, restaurantId, orders)
 end)
 
-RegisterNetEvent('delivery:storeCompletionData')
-AddEventHandler('delivery:storeCompletionData', function(data)
-    completedDeliveryData = data
-    completedDeliveryData.deliveryTime = math.floor((GetGameTimer() - deliveryStartTime) / 1000)
-end)
+-- RegisterNetEvent('delivery:storeCompletionData')
+-- AddEventHandler('delivery:storeCompletionData', function(data)
+--     debugPrint("STORE_DATA", "Storing completion data")
+--     completedDeliveryData = data
+--     completedDeliveryData.deliveryTime = math.floor((GetGameTimer() - deliveryStartTime) / 1000)
+--     debugPrint("STORE_DATA_2", "Data stored with delivery time: " .. completedDeliveryData.deliveryTime)
+-- end)
 
 -- Return Van (Clean Van Return Only - Stock Already Updated)
 RegisterNetEvent("warehouse:returnTruck")
 AddEventHandler("warehouse:returnTruck", function(van, restaurantId, orders)
-    print("[DEBUG] Returning van")
+    
+    -- Determine which warehouse to return to based on order type
+    local isImportOrder = false
+    local warehouseId = 1
+    
+    if orders[1] and orders[1].orderGroupId then
+        isImportOrder = string.find(orders[1].orderGroupId, "import_") ~= nil
+        warehouseId = isImportOrder and 2 or 1
+    end
+    
+    local warehouseName = Config.Warehouses[warehouseId].name or (warehouseId == 2 and "Import Distribution Center" or "Main Warehouse")
+    
     lib.alertDialog({
         header = "Delivery Complete",
-        content = "Great Work! Stock has been delivered and updated. Return the van to the warehouse for your payment.",
+        content = "Great Work! Stock has been delivered and updated. Return the van to " .. warehouseName .. " for your payment.",
         centered = true,
         cancel = true
     })
 
     local playerPed = PlayerPedId()
-    local vanReturnPosition = vector3(Config.Warehouses[1].vehicle.position.x, Config.Warehouses[1].vehicle.position.y, Config.Warehouses[1].vehicle.position.z)
+    local vanReturnPosition = vector3(
+        Config.Warehouses[warehouseId].vehicle.position.x, 
+        Config.Warehouses[warehouseId].vehicle.position.y, 
+        Config.Warehouses[warehouseId].vehicle.position.z
+    )
     SetNewWaypoint(vanReturnPosition.x, vanReturnPosition.y)
 
     local blip = AddBlipForCoord(vanReturnPosition.x, vanReturnPosition.y, vanReturnPosition.z)
@@ -1520,7 +1667,7 @@ AddEventHandler("warehouse:returnTruck", function(van, restaurantId, orders)
     SetBlipColour(blip, 3)
     SetBlipAsShortRange(blip, true)
     BeginTextCommandSetBlipName("STRING")
-    AddTextComponentString("Van Return Location")
+    AddTextComponentString("Return to " .. warehouseName)
     EndTextCommandSetBlipName(blip)
 
     Citizen.CreateThread(function()
@@ -1536,6 +1683,7 @@ AddEventHandler("warehouse:returnTruck", function(van, restaurantId, orders)
                     isTextUIShown = true
                 end
                 if IsControlJustPressed(0, 38) then -- E key
+                    
                     if lib.progressBar({
                         duration = 3000,
                         label = "Returning Van...",
@@ -1544,35 +1692,56 @@ AddEventHandler("warehouse:returnTruck", function(van, restaurantId, orders)
                         disable = { move = true, car = true, combat = true, sprint = true },
                         anim = { dict = "anim@scripted@heist@ig3_button_press@male@", clip = "button_press" }
                     }) then
+                        
                         lib.hideTextUI()
                         isTextUIShown = false
+                        
+                        
                         lib.alertDialog({
                             header = "Van Returned",
                             content = "Delivery job complete! Thank you for your excellent work!",
                             centered = true,
-                            cancel = true
                         })
+                        
+                        -- Add timeout to prevent infinite dialog
+                        Citizen.SetTimeout(5000, function()
+                        end)
+                        
                         RemoveBlip(blip)
                         DeleteVehicle(van)
-                        
+
                         if completedDeliveryData then
-                    TriggerServerEvent('delivery:requestPayment', completedDeliveryData)
-                        completedDeliveryData = nil -- Clear the data
-                    end
-                    
-                    lib.alertDialog({
-                        header = "Van Returned",
-                        content = "Processing your payment...",
-                        centered = true,
-                        cancel = false
-                    })
-                    
+                            print("[DEBUG] Payment data found! Total cost: " .. (completedDeliveryData.totalCost or "nil"))
+                            -- Request payment from server
+                            TriggerServerEvent('delivery:requestPayment', completedDeliveryData)
+                            completedDeliveryData = nil
+                            
+                            -- Show non-blocking notification
+                            lib.notify({
+                                title = '💰 Payment Processing',
+                                description = 'Your delivery payment is being processed...',
+                                type = 'info',
+                                duration = 4000,
+                                position = Config.UI.notificationPosition
+                            })
+                        else
+                            print("[ERROR] No delivery data found at van return!")
+                            -- Error notification
+                            lib.notify({
+                                title = '❌ Payment Error',
+                                description = 'No delivery data found. Contact support.',
+                                type = 'error',
+                                duration = 10000,
+                                position = Config.UI.notificationPosition
+                            })
+                        end
+
                         -- Reset delivery variables for next job
                         deliveryBoxesRemaining = 0
                         totalDeliveryBoxes = 0
                         currentDeliveryData = {}
                         deliveryStartTime = 0
-                        
+
                         break
                     end
                 end
@@ -1650,4 +1819,205 @@ AddEventHandler('supply:openWarehouseMenu', function(data)
             markdown = Config.UI.enableMarkdown
         })
     end
+end)
+
+-- ===================================
+-- IMPORT TRACKING DISPLAY HANDLERS
+-- ===================================
+
+-- Show incoming shipments
+RegisterNetEvent('imports:showIncomingShipments')
+AddEventHandler('imports:showIncomingShipments', function(shipments)
+    local options = {
+        {
+            title = "← Back to Import Tracking",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("imports:openTrackingMenu")
+            end
+        }
+    }
+    
+    if #shipments == 0 then
+        table.insert(options, {
+            title = "📦 No Incoming Shipments",
+            description = "All shipments have been delivered",
+            disabled = true
+        })
+    else
+        for _, shipment in ipairs(shipments) do
+            local statusIcon = shipment.status == "in_transit" and "🚢" or "📋"
+            local arrivalText = shipment.arrival and os.date("%m/%d %I:%M %p", shipment.arrival) or "TBD"
+            
+            table.insert(options, {
+                title = statusIcon .. " " .. shipment.item .. " (" .. shipment.quantity .. " units)",
+                description = string.format("From: %s | Arrival: %s | Status: %s",
+                    shipment.origin, arrivalText, shipment.status),
+                disabled = true
+            })
+        end
+    end
+    
+    lib.registerContext({
+        id = "import_shipments",
+        title = "📥 Incoming Import Shipments",
+        options = options
+    })
+    lib.showContext("import_shipments")
+end)
+
+-- Show import analytics
+RegisterNetEvent('imports:showAnalytics')
+AddEventHandler('imports:showAnalytics', function(analytics)
+    local options = {
+        {
+            title = "← Back to Import Tracking",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("imports:openTrackingMenu")
+            end
+        }
+    }
+    
+    if #analytics == 0 then
+        table.insert(options, {
+            title = "📊 No Import Data",
+            description = "No imports have been completed yet",
+            disabled = true
+        })
+    else
+        -- Summary header
+        local totalOrders = 0
+        local totalQuantity = 0
+        for _, stat in ipairs(analytics) do
+            totalOrders = totalOrders + stat.total_orders
+            totalQuantity = totalQuantity + stat.total_quantity
+        end
+        
+        table.insert(options, {
+            title = "📈 Import Summary",
+            description = string.format("Total Orders: %d | Total Units: %d",
+                totalOrders, totalQuantity),
+            disabled = true
+        })
+        
+        -- Individual items
+        for _, stat in ipairs(analytics) do
+            local lastImportText = stat.last_import and os.date("%m/%d/%Y", stat.last_import) or "Never"
+            
+            table.insert(options, {
+                title = "📦 " .. stat.item,
+                description = string.format("Orders: %d | Total: %d units | Avg: %d units | Last: %s",
+                    stat.total_orders, stat.total_quantity, stat.avg_quantity, lastImportText),
+                disabled = true
+            })
+        end
+    end
+    
+    lib.registerContext({
+        id = "import_analytics",
+        title = "📊 Import Analytics & Statistics",
+        options = options
+    })
+    lib.showContext("import_analytics")
+end)
+
+-- Configure notifications (client-side only for now)
+RegisterNetEvent('imports:configureNotifications')
+AddEventHandler('imports:configureNotifications', function()
+    lib.notify({
+        title = "🔔 Import Notifications",
+        description = "Email notifications are automatically sent when import shipments arrive",
+        type = "info",
+        duration = 8000,
+        position = Config.UI.notificationPosition
+    })
+end)
+
+-- ===================================
+-- STOCK ALERTS DISPLAY HANDLER
+-- ===================================
+
+RegisterNetEvent('stockalerts:showAlerts')
+AddEventHandler('stockalerts:showAlerts', function(alerts)
+    local options = {
+        {
+            title = "← Back to Warehouse Menu",
+            icon = "fas fa-arrow-left",
+            onSelect = function()
+                TriggerEvent("warehouse:openProcessingMenu")
+            end
+        }
+    }
+    
+    if #alerts == 0 then
+        table.insert(options, {
+            title = "✅ All Stock Levels Healthy",
+            description = "No stock alerts at this time",
+            disabled = true
+        })
+    else
+        -- Sort by alert level (critical first)
+        table.sort(alerts, function(a, b)
+            local levels = {critical = 1, low = 2, moderate = 3}
+            return levels[a.alert_level] < levels[b.alert_level]
+        end)
+        
+        -- Group by alert level
+        local criticalCount, lowCount, moderateCount = 0, 0, 0
+        for _, alert in ipairs(alerts) do
+            if alert.alert_level == "critical" then criticalCount = criticalCount + 1
+            elseif alert.alert_level == "low" then lowCount = lowCount + 1
+            else moderateCount = moderateCount + 1 end
+        end
+        
+        -- Summary
+        table.insert(options, {
+            title = "📊 Alert Summary",
+            description = string.format("🔴 Critical: %d | 🟡 Low: %d | 🔵 Moderate: %d",
+                criticalCount, lowCount, moderateCount),
+            disabled = true
+        })
+        
+        -- Individual alerts
+        for _, alert in ipairs(alerts) do
+            local levelIcon = {
+                critical = "🔴",
+                low = "🟡", 
+                moderate = "🔵"
+            }
+            
+            local description = string.format("Warehouse: %d units (%.1f%%) | Max: %d",
+                alert.warehouse_stock, alert.percentage, alert.max_stock)
+            
+            -- Add import stock info if applicable
+            if alert.import_stock and alert.import_stock > 0 then
+                local importIcon = alert.import_alert and 
+                    (alert.import_alert.level == "critical" and "🔴" or "🟡") or "🟢"
+                description = description .. string.format("\n%s Import Stock: %d units",
+                    importIcon, alert.import_stock)
+            end
+            
+            table.insert(options, {
+                title = levelIcon[alert.alert_level] .. " " .. alert.label,
+                description = description,
+                onSelect = function()
+                    lib.notify({
+                        title = "Quick Order",
+                        description = "Use the Order Goods menu to restock " .. alert.label,
+                        type = "info",
+                        duration = 5000,
+                        position = Config.UI.notificationPosition
+                    })
+                end
+            })
+        end
+    end
+    
+    lib.registerContext({
+        id = "stock_alerts_menu",
+        title = "🚨 Stock Alert Dashboard",
+        options = options
+    })
+    lib.showContext("stock_alerts_menu")
 end)

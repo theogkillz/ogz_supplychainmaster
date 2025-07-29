@@ -8,9 +8,9 @@ Citizen.CreateThread(function()
     for id, restaurant in pairs(Config.Restaurants) do
         exports.ox_target:addBoxZone({
             coords = restaurant.position,
-            size = vector3(1.5, 1.5, 1.0),
+            size = vector3(2.0, 2.0, 1.5),
             rotation = restaurant.heading,
-            debug = false,
+            debug = true,
             options = {
                 {
                     name = "restaurant_computer_" .. id,

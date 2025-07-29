@@ -502,3 +502,109 @@ AddEventHandler('onResourceStart', function(resourceName)
         print('[ADMIN] Add admins by adding their license2 to the AdminList table')
     end
 end)
+
+-- Import stock management command
+QBCore.Commands.Add('importstock', 'Manage import warehouse stock (Admin Only)', {
+    {name = 'action', help = 'add/set/check'},
+    {name = 'item', help = 'Item name (optional for check)'},
+    {name = 'amount', help = 'Amount (optional for check)'}
+}, false, function(source, args)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    
+    -- Admin check
+    if not Player.PlayerData.job.name == 'admin' and not Player.PlayerData.job.name == 'god' then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Error',
+            description = 'Admin access required',
+            type = 'error',
+            duration = 5000,
+            position = Config.UI.notificationPosition
+        })
+        return
+    end
+    
+    local action = args[1]:lower()
+    local item = args[2] and args[2]:lower()
+    local amount = tonumber(args[3])
+    
+    if action == 'check' then
+        -- Check all or specific item
+        local query = item and 'SELECT * FROM supply_import_stock WHERE ingredient = ?' or 'SELECT * FROM supply_import_stock'
+        local params = item and {item} or {}
+        
+        MySQL.Async.fetchAll(query, params, function(results)
+            if #results == 0 then
+                TriggerClientEvent('ox_lib:notify', src, {
+                    title = 'Import Stock',
+                    description = item and 'Item not found in import stock' or 'No import stock found',
+                    type = 'info',
+                    duration = 5000,
+                    position = Config.UI.notificationPosition
+                })
+            else
+                local itemNames = exports.ox_inventory:Items() or {}
+                for _, stock in ipairs(results) do
+                    local label = itemNames[stock.ingredient] and itemNames[stock.ingredient].label or stock.ingredient
+                    TriggerClientEvent('ox_lib:notify', src, {
+                        title = '🌍 Import Stock',
+                        description = string.format('%s: %d units', label, stock.quantity),
+                        type = 'info',
+                        duration = 7000,
+                        position = Config.UI.notificationPosition
+                    })
+                end
+            end
+        end)
+        
+    elseif action == 'add' or action == 'set' then
+        if not item or not amount then
+            TriggerClientEvent('ox_lib:notify', src, {
+                title = 'Error',
+                description = 'Usage: /importstock ' .. action .. ' [item] [amount]',
+                type = 'error',
+                duration = 5000,
+                position = Config.UI.notificationPosition
+            })
+            return
+        end
+        
+        if action == 'add' then
+            MySQL.Async.execute([[
+                INSERT INTO supply_import_stock (ingredient, quantity) 
+                VALUES (?, ?) 
+                ON DUPLICATE KEY UPDATE quantity = quantity + ?
+            ]], {item, amount, amount}, function(affected)
+                TriggerClientEvent('ox_lib:notify', src, {
+                    title = 'Import Stock Added',
+                    description = string.format('Added %d units of %s to import stock', amount, item),
+                    type = 'success',
+                    duration = 5000,
+                    position = Config.UI.notificationPosition
+                })
+            end)
+        else -- set
+            MySQL.Async.execute([[
+                INSERT INTO supply_import_stock (ingredient, quantity) 
+                VALUES (?, ?) 
+                ON DUPLICATE KEY UPDATE quantity = ?
+            ]], {item, amount, amount}, function(affected)
+                TriggerClientEvent('ox_lib:notify', src, {
+                    title = 'Import Stock Set',
+                    description = string.format('Set %s import stock to %d units', item, amount),
+                    type = 'success',
+                    duration = 5000,
+                    position = Config.UI.notificationPosition
+                })
+            end)
+        end
+    else
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Error',
+            description = 'Valid actions: check, add, set',
+            type = 'error',
+            duration = 5000,
+            position = Config.UI.notificationPosition
+        })
+    end
+end, 'admin')
