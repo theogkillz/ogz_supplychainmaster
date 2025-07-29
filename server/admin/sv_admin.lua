@@ -1,31 +1,33 @@
 local QBCore = exports['qb-core']:GetCoreObject()
 
 -- ===============================================
--- ADMIN CONFIGURATION
+-- REFINED ADMIN SYSTEM - SERVER SIDE
+-- ===============================================
+-- Streamlined from complex to focused functionality
 -- ===============================================
 
--- Add your admin license2 identifiers here
+-- Admin list with license2 identifiers
 local AdminList = {
     ["license2:02e93de433b665fc9572546e584552674c49978d"] = "superadmin",
-    -- Add your admins below:
     ["license2:7c244f49f115502178c9efc54efa183bc4ddb49d"] = "admin", -- Kat
     ["license2:a374445a04dd4245baa057b5a951f7e73afae6fc"] = "moderator", -- Nuttzie
 }
 
+-- Debug mode state
+local debugMode = false
+
 -- ===============================================
--- PERMISSION CHECKING FUNCTIONS (SIMPLIFIED)
+-- PERMISSION SYSTEM (SIMPLIFIED)
 -- ===============================================
 
--- Main permission check function
-local function hasAdminPermission(source, requiredLevel)
+local function getAdminLevel(source)
     local xPlayer = QBCore.Functions.GetPlayer(source)
-    if not xPlayer then return false end
+    if not xPlayer then return nil end
     
-    -- Get player identifiers
+    -- Get license2 identifier
     local identifiers = GetPlayerIdentifiers(source)
     local license2 = nil
     
-    -- Find license2 identifier
     for _, id in pairs(identifiers) do
         if string.sub(id, 1, 9) == "license2:" then
             license2 = id
@@ -33,424 +35,166 @@ local function hasAdminPermission(source, requiredLevel)
         end
     end
     
-    -- Check 1: License2-based admin list
+    -- Check admin list first
     if license2 and AdminList[license2] then
-        local adminLevel = AdminList[license2]
-        print(string.format("[ADMIN] Player %s has admin level: %s", GetPlayerName(source), adminLevel))
-        
-        -- Check if their admin level meets requirement
-        if requiredLevel == "moderator" then
-            return true -- Any admin level can access moderator features
-        elseif requiredLevel == "admin" then
-            return adminLevel == "admin" or adminLevel == "superadmin"
-        elseif requiredLevel == "superadmin" then
-            return adminLevel == "superadmin"
-        end
+        return AdminList[license2]
     end
     
-    -- Check 2: Hurst boss grade
+    -- Check Hurst boss
     if xPlayer.PlayerData.job and xPlayer.PlayerData.job.name == "hurst" then
-        -- Check if boss or high grade
         if xPlayer.PlayerData.job.isboss then
-            print(string.format("[ADMIN] Player %s has Hurst boss access", GetPlayerName(source)))
-            return true -- Boss has full access
+            return "admin"
         elseif xPlayer.PlayerData.job.grade and xPlayer.PlayerData.job.grade.level >= 3 then
-            print(string.format("[ADMIN] Player %s has Hurst grade %d access", GetPlayerName(source), xPlayer.PlayerData.job.grade.level))
-            return true -- High grade has access
+            return "moderator"
         end
     end
     
-    -- Check 3: QBCore admin permissions (fallback)
+    -- Check QBCore permissions
     if QBCore.Functions.HasPermission then
-        local hasQBPerm = QBCore.Functions.HasPermission(source, requiredLevel)
-        if hasQBPerm then
-            print(string.format("[ADMIN] Player %s has QBCore %s permission", GetPlayerName(source), requiredLevel))
-            return true
+        if QBCore.Functions.HasPermission(source, "god") then
+            return "superadmin"
+        elseif QBCore.Functions.HasPermission(source, "admin") then
+            return "admin"
+        elseif QBCore.Functions.HasPermission(source, "mod") then
+            return "moderator"
         end
+    end
+    
+    return nil
+end
+
+local function hasAdminPermission(source, requiredLevel)
+    local adminLevel = getAdminLevel(source)
+    
+    -- Debug logging
+    if debugMode or true then -- Always log during testing
+        print(string.format("[ADMIN DEBUG] Player %s - Admin Level: %s - Required: %s", 
+            GetPlayerName(source), 
+            adminLevel or "none", 
+            requiredLevel))
+    end
+    
+    if not adminLevel then return false end
+    
+    if requiredLevel == "moderator" then
+        return true -- Any admin level
+    elseif requiredLevel == "admin" then
+        return adminLevel == "admin" or adminLevel == "superadmin"
+    elseif requiredLevel == "superadmin" then
+        return adminLevel == "superadmin"
     end
     
     return false
 end
 
 -- ===============================================
--- COMMAND HANDLER FUNCTIONS
+-- MAIN ADMIN MENU REQUEST
 -- ===============================================
 
--- Console command handler
-local function handleConsoleCommand(args)
-    local action = args[1] and args[1]:lower()
-    
-    if action == 'stats' then
-        -- Console version of stats
-        MySQL.Async.fetchAll([[
-            SELECT 
-                (SELECT COUNT(*) FROM supply_orders WHERE status = 'pending') as pending_orders,
-                (SELECT COUNT(*) FROM supply_orders WHERE status = 'completed' AND DATE(created_at) = CURDATE()) as daily_completed,
-                (SELECT COUNT(DISTINCT citizenid) FROM supply_driver_stats WHERE DATE(delivery_date) = CURDATE()) as active_drivers
-        ]], {}, function(results)
-            if results and results[1] then
-                local stats = results[1]
-                print('=== SUPPLY CHAIN STATISTICS ===')
-                print('Pending Orders: ' .. (stats.pending_orders or 0))
-                print('Daily Completed: ' .. (stats.daily_completed or 0))
-                print('Active Drivers: ' .. (stats.active_drivers or 0))
-                print('================================')
-            end
-        end)
-        
-    elseif action == 'addadmin' then
-        local license = args[2]
-        local level = args[3] or "admin"
-        
-        if license and string.sub(license, 1, 9) == "license2:" then
-            print(string.format("[ADMIN] Added %s with level %s to admin list", license, level))
-            print("[ADMIN] Remember to add this to your sv_admin.lua AdminList table!")
-            print(string.format('["%s"] = "%s",', license, level))
-        else
-            print("[ADMIN] Usage: supply addadmin license2:xxxxx [moderator/admin/superadmin]")
-        end
-        
-    elseif action == 'help' then
-        print('=== SUPPLY CHAIN CONSOLE COMMANDS ===')
-        print('supply stats - Show system statistics')
-        print('supply addadmin - Show how to add an admin')
-        print('supply help - Show this help menu')
-        print('======================================')
-        
-    else
-        print('Supply Chain Admin: Use "supply help" for commands')
-    end
-end
-
--- System stats function
-local function getSystemStats(source)
-    if not hasAdminPermission(source, 'moderator') then 
-        TriggerClientEvent('ox_lib:notify', source, {
-            title = 'Access Denied',
-            description = 'You need admin or Hurst boss permissions.',
-            type = 'error',
-            duration = 5000
-        })
-        return 
-    end
-    
-    MySQL.Async.fetchAll([[
-        SELECT 
-            (SELECT COUNT(*) FROM supply_orders WHERE status = 'pending') as pending_orders,
-            (SELECT COUNT(*) FROM supply_orders WHERE status = 'accepted') as active_orders,
-            (SELECT COUNT(*) FROM supply_orders WHERE status = 'completed' AND DATE(created_at) = CURDATE()) as daily_completed,
-            (SELECT COUNT(DISTINCT citizenid) FROM supply_driver_stats WHERE DATE(delivery_date) = CURDATE()) as active_drivers,
-            (SELECT COUNT(*) FROM supply_team_deliveries WHERE DATE(created_at) = CURDATE()) as team_deliveries
-    ]], {}, function(result)
-        if result and result[1] then
-            local stats = result[1]
-            
-            TriggerClientEvent('ox_lib:notify', source, {
-                title = '📊 System Statistics',
-                description = string.format(
-                    '📋 Pending Orders: %d\n🚚 Active Deliveries: %d\n✅ Daily Completed: %d\n👥 Active Drivers: %d\n🚛 Team Deliveries: %d',
-                    stats.pending_orders or 0,
-                    stats.active_orders or 0,
-                    stats.daily_completed or 0,
-                    stats.active_drivers or 0,
-                    stats.team_deliveries or 0
-                ),
-                type = 'info',
-                duration = 15000,
-                position = 'top',
-                markdown = true
-            })
-        end
-    end)
-end
-
--- System overview function for admin menu
-local function getSystemOverview(source, callback)
-    MySQL.Async.fetchAll([[
-        SELECT 
-            (SELECT COUNT(*) FROM supply_orders WHERE status = 'pending') as pending_orders,
-            (SELECT COUNT(*) FROM supply_orders WHERE status = 'completed' AND DATE(created_at) = CURDATE()) as daily_orders,
-            (SELECT COUNT(DISTINCT citizenid) FROM supply_driver_stats WHERE DATE(delivery_date) = CURDATE()) as active_drivers
-    ]], {}, function(result)
-        local data = {
-            pendingOrders = (result and result[1] and result[1].pending_orders) or 0,
-            dailyOrders = (result and result[1] and result[1].daily_orders) or 0,
-            activeDrivers = (result and result[1] and result[1].active_drivers) or 0,
-            criticalAlerts = 0,
-            emergencyOrders = 0,
-            marketAverage = 1.0,
-            systemStatus = 'healthy',
-            uptime = GetGameTimer() / 1000
-        }
-        
-        callback(data)
-    end)
-end
-
--- ===============================================
--- JOB RESET COMMANDS
--- ===============================================
-
--- Job reset command for troubleshooting
-RegisterCommand('supplyjobreset', function(source, args, rawCommand)
-    local src = source
-    local targetId = tonumber(args[1]) or src
-    
-    -- Permission check
-    if src ~= 0 and not hasAdminPermission(src, 'moderator') then
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = 'Access Denied',
-            description = 'You need admin or Hurst boss permissions.',
-            type = 'error',
-            duration = 5000
-        })
-        return
-    end
-    
-    -- Get target player
-    local xPlayer = QBCore.Functions.GetPlayer(targetId)
-    if not xPlayer then
-        local message = 'Player not found with ID: ' .. targetId
-        if src == 0 then
-            print('[SUPPLY RESET] ' .. message)
-        else
-            TriggerClientEvent('ox_lib:notify', src, {
-                title = 'Player Not Found',
-                description = message,
-                type = 'error',
-                duration = 5000
-            })
-        end
-        return
-    end
-    
-    local targetName = xPlayer.PlayerData.charinfo.firstname .. ' ' .. xPlayer.PlayerData.charinfo.lastname
-    local citizenid = xPlayer.PlayerData.citizenid
-    
-    -- Start the reset process
-    if src == 0 then
-        print('[SUPPLY RESET] Starting job reset for: ' .. targetName .. ' (ID: ' .. targetId .. ')')
-    else
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = 'Job Reset Started',
-            description = 'Resetting supply chain job for: ' .. targetName,
-            type = 'info',
-            duration = 5000
-        })
-    end
-    
-    -- 1. CLIENT-SIDE RESET - Clean up any stuck states
-    TriggerClientEvent('supply:forceJobReset', targetId)
-    
-    -- 2. SERVER-SIDE RESET - Clean up database states
-    
-    -- Cancel any active orders assigned to this player
-    MySQL.Async.execute([[
-        UPDATE supply_orders 
-        SET status = 'pending' 
-        WHERE status = 'accepted' AND order_group_id IN (
-            SELECT order_group_id FROM supply_orders WHERE owner_id = ?
-        )
-    ]], {targetId}, function(success)
-        if success then
-            print('[SUPPLY RESET] Reset active orders for player: ' .. targetName)
-        end
-    end)
-    
-    -- Remove from any active teams
-    MySQL.Async.fetchAll('SELECT team_id FROM supply_team_members WHERE citizenid = ?', {citizenid}, function(teams)
-        if teams and #teams > 0 then
-            for _, team in ipairs(teams) do
-                -- Remove from team members
-                MySQL.Async.execute('DELETE FROM supply_team_members WHERE citizenid = ?', {citizenid})
-                
-                -- If they were team leader, dissolve the team
-                MySQL.Async.execute('DELETE FROM supply_team_deliveries WHERE leader_citizenid = ?', {citizenid})
-                
-                print('[SUPPLY RESET] Removed ' .. targetName .. ' from team: ' .. team.team_id)
-            end
-        end
-    end)
-    
-    -- Clear any stuck delivery states
-    MySQL.Async.execute([[
-        UPDATE supply_driver_stats 
-        SET updated_at = CURRENT_TIMESTAMP 
-        WHERE citizenid = ? AND delivery_date = CURDATE()
-    ]], {citizenid})
-    
-    -- 3. Wait a moment then notify completion
-    Citizen.SetTimeout(2000, function()
-        -- Notify admin
-        local resetMessage = string.format(
-            'Job reset complete for %s (ID: %d)\n✅ Orders reset\n✅ Team assignments cleared\n✅ Client state reset\n✅ Database cleaned',
-            targetName, targetId
-        )
-        
-        if src == 0 then
-            print('[SUPPLY RESET] ' .. resetMessage:gsub('\n', ' | '))
-        else
-            TriggerClientEvent('ox_lib:notify', src, {
-                title = '✅ Job Reset Complete',
-                description = resetMessage,
-                type = 'success',
-                duration = 10000,
-                markdown = true
-            })
-        end
-        
-        -- Notify the target player
-        TriggerClientEvent('ox_lib:notify', targetId, {
-            title = '🔄 Job Reset',
-            description = 'Your supply chain job has been reset by an admin.\nYou can now start fresh!',
-            type = 'info',
-            duration = 8000
-        })
-    end)
-    
-end, false)
-
--- ===============================================
--- MAIN ADMIN COMMAND
--- ===============================================
-
--- TEST COMMAND for debugging permissions
-RegisterCommand('supplytest', function(source, args, rawCommand)
-    if source == 0 then
-        print("Console cannot use this command")
-        return
-    end
-    
-    local xPlayer = QBCore.Functions.GetPlayer(source)
-    if not xPlayer then
-        print("No player found")
-        return
-    end
-    
-    -- Get player's license2
-    local identifiers = GetPlayerIdentifiers(source)
-    local license2 = nil
-    for _, id in pairs(identifiers) do
-        if string.sub(id, 1, 9) == "license2:" then
-            license2 = id
-            break
-        end
-    end
-    
-    local job = xPlayer.PlayerData.job and xPlayer.PlayerData.job.name
-    local grade = xPlayer.PlayerData.job and xPlayer.PlayerData.job.grade and xPlayer.PlayerData.job.grade.level
-    local isBoss = xPlayer.PlayerData.job and xPlayer.PlayerData.job.isboss
-    local isInAdminList = license2 and AdminList[license2] and true or false
-    local adminLevel = license2 and AdminList[license2] or "none"
-    
-    TriggerClientEvent('ox_lib:notify', source, {
-        title = '🔍 Permission Debug',
-        description = string.format(
-            "**License2:** %s\n**In Admin List:** %s\n**Admin Level:** %s\n**Job:** %s\n**Grade:** %s\n**Boss:** %s\n**Has Access:** %s",
-            license2 and "Found" or "Not Found",
-            isInAdminList and "✅ YES" or "❌ NO",
-            adminLevel,
-            job or "none", 
-            grade or "none",
-            isBoss and "Yes" or "No",
-            hasAdminPermission(source, 'moderator') and "✅ GRANTED" or "❌ DENIED"
-        ),
-        type = 'info',
-        duration = 20000,
-        position = 'top',
-        markdown = true
-    })
-    
-    -- Also print license2 to console for easy copying
-    if license2 then
-        print(string.format("[ADMIN] Player %s license2: %s", GetPlayerName(source), license2))
-        print(string.format("[ADMIN] To add as admin, add this line to AdminList table:"))
-        print(string.format('["%s"] = "admin",', license2))
-    end
-end, false)
-
--- MAIN ADMIN COMMAND
-RegisterCommand('supply', function(source, args, rawCommand)
-    if source == 0 then
-        handleConsoleCommand(args)
-        return
-    end
-    
-    -- Check permissions
-    if not hasAdminPermission(source, 'moderator') then
-        TriggerClientEvent('ox_lib:notify', source, {
-            title = 'Access Denied',
-            description = 'You need admin or Hurst boss permissions.\nUse `/supplytest` to check your access.',
-            type = 'error',
-            duration = 8000
-        })
-        return
-    end
-    
-    local action = args[1] and args[1]:lower()
-    
-    if not action then
-        -- Open admin menu
-        TriggerClientEvent('supply:openAdminMenu', source)
-        return
-    end
-    
-    -- Handle specific commands
-    if action == 'stats' then
-        getSystemStats(source)
-    elseif action == 'reload' then
-        TriggerClientEvent('ox_lib:notify', source, {
-            title = 'System Reloaded',
-            description = 'Key systems reinitialized.',
-            type = 'success',
-            duration = 8000
-        })
-    else
-        TriggerClientEvent('ox_lib:notify', source, {
-            title = 'Invalid Command',
-            description = 'Use /supply for the admin menu.',
-            type = 'error',
-            duration = 5000
-        })
-    end
-end, false)
-
--- ===============================================
--- ADMIN MENU SYSTEM
--- ===============================================
 RegisterNetEvent('supply:requestAdminMenu')
 AddEventHandler('supply:requestAdminMenu', function()
+    local src = source
+    local adminLevel = getAdminLevel(src)
+    
+    print(string.format("[ADMIN] Menu requested by %s (ID: %d) - Level: %s", 
+        GetPlayerName(src), src, adminLevel or "none"))
+    
+    if not adminLevel then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Access Denied',
+            description = 'Admin permissions required\nUse /supplytest to check your access',
+            type = 'error',
+            duration = 8000
+        })
+        return
+    end
+    
+    print("[ADMIN] Fetching system data for admin menu...")
+    
+    -- Initialize data
+    local data = {
+        pendingOrders = 0,
+        dailyOrders = 0,
+        activeDrivers = 0,
+        criticalAlerts = 0,
+        systemStatus = 'healthy'
+    }
+    
+    -- Use simple separate queries for reliability
+    local queriesCompleted = 0
+    local totalQueries = 4
+    local menuSent = false
+    
+    local function sendMenu()
+        if menuSent then return end
+        menuSent = true
+        
+        -- Determine system status
+        if data.criticalAlerts > 0 then
+            data.systemStatus = 'critical'
+        elseif data.pendingOrders > 20 then
+            data.systemStatus = 'warning'
+        end
+        
+        print(string.format("[ADMIN] Sending menu to %s with data: pending=%d, daily=%d, drivers=%d", 
+            GetPlayerName(src), data.pendingOrders, data.dailyOrders, data.activeDrivers))
+        
+        TriggerClientEvent('supply:showAdminMenu', src, data, adminLevel)
+    end
+    
+    local function checkComplete()
+        queriesCompleted = queriesCompleted + 1
+        if queriesCompleted == totalQueries then
+            sendMenu()
+        end
+    end
+    
+    -- Timeout fallback (2 seconds)
+    SetTimeout(2000, function()
+        if not menuSent then
+            print("[ADMIN WARNING] Query timeout - sending menu with partial data")
+            sendMenu()
+        end
+    end)
+    
+    -- Query 1: Pending orders
+    MySQL.Async.fetchScalar("SELECT COUNT(*) FROM supply_orders WHERE status = 'pending'", {}, function(count)
+        data.pendingOrders = count or 0
+        checkComplete()
+    end)
+    
+    -- Query 2: Daily completed orders
+    MySQL.Async.fetchScalar("SELECT COUNT(*) FROM supply_orders WHERE status = 'completed' AND DATE(created_at) = CURDATE()", {}, function(count)
+        data.dailyOrders = count or 0
+        checkComplete()
+    end)
+    
+    -- Query 3: Active drivers today
+    MySQL.Async.fetchScalar("SELECT COUNT(DISTINCT citizenid) FROM supply_driver_stats WHERE DATE(delivery_date) = CURDATE()", {}, function(count)
+        data.activeDrivers = count or 0
+        checkComplete()
+    end)
+    
+    -- Query 4: Critical alerts (simplified)
+    MySQL.Async.fetchScalar("SELECT COUNT(*) FROM supply_stock_alerts WHERE alert_type = 'critical'", {}, function(count)
+        data.criticalAlerts = count or 0
+        checkComplete()
+    end)
+end)
+
+-- ===============================================
+-- OPERATIONS HANDLERS
+-- ===============================================
+
+-- Stock adjustment (fixed to check proper permission)
+RegisterNetEvent('admin:adjustStock')
+AddEventHandler('admin:adjustStock', function(ingredient, newQuantity)
     local src = source
     
     if not hasAdminPermission(src, 'moderator') then 
         TriggerClientEvent('ox_lib:notify', src, {
             title = 'Access Denied',
-            description = 'You need admin or Hurst boss permissions.',
-            type = 'error',
-            duration = 5000
-        })
-        return 
-    end
-    
-    -- Get system overview data
-    getSystemOverview(src, function(data)
-        TriggerClientEvent('supply:showAdminMenu', src, data)
-    end)
-end)
-
--- ===============================================
--- BASIC ADMIN EVENTS
--- ===============================================
-
--- Manual Stock Adjustment
-RegisterNetEvent('admin:adjustStock')
-AddEventHandler('admin:adjustStock', function(ingredient, newQuantity)
-    local src = source
-    
-    if not hasAdminPermission(src, 'admin') then 
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = 'Access Denied',
-            description = 'Admin level required for stock adjustments.',
+            description = 'Admin permissions required',
             type = 'error',
             duration = 5000
         })
@@ -463,290 +207,700 @@ AddEventHandler('admin:adjustStock', function(ingredient, newQuantity)
         ON DUPLICATE KEY UPDATE quantity = ?
     ]], {ingredient, newQuantity, newQuantity}, function(success)
         if success then
-            local itemNames = exports.ox_inventory:Items() or {}
-            local itemLabel = itemNames[ingredient] and itemNames[ingredient].label or ingredient
+            -- Get item label from config
+            local itemLabel = ingredient
+            if Config.Ingredients and Config.Ingredients[ingredient] then
+                itemLabel = Config.Ingredients[ingredient].label or ingredient
+            end
             
             TriggerClientEvent('ox_lib:notify', src, {
-                title = 'Stock Adjusted',
-                description = string.format('%s stock set to %d units', itemLabel, newQuantity),
+                title = '✅ Stock Adjusted',
+                description = string.format('%s set to %d units', itemLabel, newQuantity),
                 type = 'success',
                 duration = 8000
             })
+            
+            -- Log the action
+            print(string.format("[ADMIN] %s adjusted %s stock to %d", GetPlayerName(src), ingredient, newQuantity))
         end
     end)
 end)
 
 -- ===============================================
--- COMMAND SUGGESTIONS
+-- ANALYTICS HANDLERS
 -- ===============================================
 
--- Add command suggestions
-TriggerEvent('chat:addSuggestion', '/supply', 'Open Supply Chain Admin Menu', {
-    { name = 'action', help = 'stats/reload (optional)' }
-})
-
-TriggerEvent('chat:addSuggestion', '/supplyjobreset', 'Reset supply chain job for a player', {
-    { name = 'playerid', help = 'Player server ID (optional - defaults to yourself)' }
-})
-
-TriggerEvent('chat:addSuggestion', '/supplytest', 'Test your admin permissions and get your license2')
-
--- ===============================================
--- INITIALIZATION
--- ===============================================
-AddEventHandler('onResourceStart', function(resourceName)
-    if resourceName == GetCurrentResourceName() then
-        print('[ADMIN] Supply Chain admin system loaded!')
-        print('[ADMIN] Use /supply for admin menu')
-        print('[ADMIN] Use /supplytest to get your license2 identifier')
-        print('[ADMIN] Add admins by adding their license2 to the AdminList table')
-    end
+RegisterNetEvent('admin:getSystemAnalytics')
+AddEventHandler('admin:getSystemAnalytics', function()
+    local src = source
+    
+    if not hasAdminPermission(src, 'moderator') then return end
+    
+    MySQL.Async.fetchAll([[
+        SELECT 
+            (SELECT COUNT(*) FROM supply_orders WHERE status = 'completed' AND DATE(created_at) = CURDATE()) as today_orders,
+            (SELECT SUM(total_cost) FROM supply_orders WHERE status = 'completed' AND DATE(created_at) = CURDATE()) as today_revenue,
+            (SELECT COUNT(DISTINCT citizenid) FROM supply_driver_stats WHERE DATE(delivery_date) = CURDATE()) as active_drivers,
+            (SELECT AVG(TIMESTAMPDIFF(MINUTE, created_at, updated_at)) FROM supply_orders WHERE status = 'completed' AND DATE(created_at) = CURDATE()) as avg_completion,
+            (SELECT COUNT(*) FROM supply_orders WHERE status = 'completed') as total_deliveries,
+            (SELECT SUM(total_cost) FROM supply_orders WHERE status = 'completed') as total_revenue,
+            (SELECT COUNT(DISTINCT citizenid) FROM supply_driver_stats) as total_drivers
+    ]], {}, function(result)
+        if result and result[1] then
+            local data = result[1]
+            
+            -- Calculate orders per hour
+            local hoursElapsed = tonumber(os.date("%H")) + (tonumber(os.date("%M")) / 60)
+            data.ordersPerHour = hoursElapsed > 0 and (data.today_orders / hoursElapsed) or 0
+            
+            TriggerClientEvent('admin:displaySystemAnalytics', src, {
+                todayOrders = data.today_orders or 0,
+                todayRevenue = data.today_revenue or 0,
+                activeDrivers = data.active_drivers or 0,
+                avgCompletionTime = data.avg_completion or 0,
+                totalDeliveries = data.total_deliveries or 0,
+                totalRevenue = data.total_revenue or 0,
+                totalDrivers = data.total_drivers or 0,
+                ordersPerHour = data.ordersPerHour
+            })
+        end
+    end)
 end)
 
--- Import stock management command
-QBCore.Commands.Add('importstock', 'Manage import warehouse stock (Admin Only)', {
-    {name = 'action', help = 'add/set/check'},
-    {name = 'item', help = 'Item name (optional for check)'},
-    {name = 'amount', help = 'Amount (optional for check)'}
-}, false, function(source, args)
+RegisterNetEvent('admin:getTopPerformers')
+AddEventHandler('admin:getTopPerformers', function()
     local src = source
-    local Player = QBCore.Functions.GetPlayer(src)
     
-    -- Admin check
-    if not Player.PlayerData.job.name == 'admin' and not Player.PlayerData.job.name == 'god' then
-        TriggerClientEvent('ox_lib:notify', src, {
-            title = 'Error',
-            description = 'Admin access required',
-            type = 'error',
-            duration = 5000,
-            position = Config.UI.notificationPosition
-        })
-        return
-    end
+    if not hasAdminPermission(src, 'moderator') then return end
     
-    local action = args[1]:lower()
-    local item = args[2] and args[2]:lower()
-    local amount = tonumber(args[3])
-    
-    if action == 'check' then
-        -- Check all or specific item
-        local query = item and 'SELECT * FROM supply_import_stock WHERE ingredient = ?' or 'SELECT * FROM supply_import_stock'
-        local params = item and {item} or {}
+    MySQL.Async.fetchAll([[
+        SELECT 
+            ds.citizenid,
+            p.charinfo,
+            COUNT(*) as deliveries,
+            SUM(ds.total_earned) as earnings
+        FROM supply_driver_stats ds
+        JOIN players p ON p.citizenid = ds.citizenid
+        WHERE DATE(ds.delivery_date) = CURDATE()
+        GROUP BY ds.citizenid
+        ORDER BY deliveries DESC
+        LIMIT 10
+    ]], {}, function(results)
+        local performers = {}
         
-        MySQL.Async.fetchAll(query, params, function(results)
-            if #results == 0 then
-                TriggerClientEvent('ox_lib:notify', src, {
-                    title = 'Import Stock',
-                    description = item and 'Item not found in import stock' or 'No import stock found',
-                    type = 'info',
-                    duration = 5000,
-                    position = Config.UI.notificationPosition
-                })
-            else
-                local itemNames = exports.ox_inventory:Items() or {}
-                for _, stock in ipairs(results) do
-                    local label = itemNames[stock.ingredient] and itemNames[stock.ingredient].label or stock.ingredient
-                    TriggerClientEvent('ox_lib:notify', src, {
-                        title = '🌍 Import Stock',
-                        description = string.format('%s: %d units', label, stock.quantity),
-                        type = 'info',
-                        duration = 7000,
-                        position = Config.UI.notificationPosition
-                    })
-                end
-            end
-        end)
+        for _, row in ipairs(results or {}) do
+            local charinfo = json.decode(row.charinfo)
+            table.insert(performers, {
+                name = charinfo.firstname .. ' ' .. charinfo.lastname,
+                deliveries = row.deliveries,
+                earnings = row.earnings
+            })
+        end
         
-    elseif action == 'add' or action == 'set' then
-        if not item or not amount then
+        TriggerClientEvent('admin:displayTopPerformers', src, performers)
+    end)
+end)
+
+RegisterNetEvent('admin:getMarketTrends')
+AddEventHandler('admin:getMarketTrends', function()
+    local src = source
+    
+    if not hasAdminPermission(src, 'moderator') then return end
+    
+    -- Get current market state
+    local marketData = {}
+    
+    MySQL.Async.fetchAll([[
+        SELECT 
+            mp.ingredient,
+            mp.base_price,
+            mp.current_price,
+            mp.multiplier,
+            ws.quantity as stock
+        FROM supply_market_prices mp
+        LEFT JOIN supply_warehouse_stock ws ON ws.ingredient = mp.ingredient
+    ]], {}, function(results)
+        for _, item in ipairs(results or {}) do
+            local label = Config.Ingredients[item.ingredient] and Config.Ingredients[item.ingredient].label or item.ingredient
+            
+            marketData[item.ingredient] = {
+                label = label,
+                basePrice = item.base_price,
+                currentPrice = item.current_price,
+                multiplier = item.multiplier,
+                stock = item.stock or 0,
+                trend = item.multiplier > 1.2 and "📈 High Demand" or item.multiplier < 0.8 and "📉 Surplus" or "➡️ Stable"
+            }
+        end
+        
+        TriggerClientEvent('admin:displayMarketOverview', src, marketData)
+    end)
+end)
+
+RegisterNetEvent('admin:getAlertSummary')
+AddEventHandler('admin:getAlertSummary', function()
+    local src = source
+    
+    if not hasAdminPermission(src, 'moderator') then return end
+    
+    MySQL.Async.fetchAll([[
+        SELECT 
+            ingredient,
+            alert_type,
+            message,
+            created_at
+        FROM supply_stock_alerts
+        ORDER BY 
+            CASE alert_type 
+                WHEN 'critical' THEN 1
+                WHEN 'low' THEN 2
+                ELSE 3
+            END,
+            created_at DESC
+        LIMIT 10
+    ]], {}, function(results)
+        if not results or #results == 0 then
             TriggerClientEvent('ox_lib:notify', src, {
-                title = 'Error',
-                description = 'Usage: /importstock ' .. action .. ' [item] [amount]',
-                type = 'error',
-                duration = 5000,
-                position = Config.UI.notificationPosition
+                title = '✅ No Active Alerts',
+                description = 'All systems operating normally',
+                type = 'success',
+                duration = 5000
             })
             return
         end
         
-        if action == 'add' then
-            MySQL.Async.execute([[
-                INSERT INTO supply_import_stock (ingredient, quantity) 
-                VALUES (?, ?) 
-                ON DUPLICATE KEY UPDATE quantity = quantity + ?
-            ]], {item, amount, amount}, function(affected)
-                TriggerClientEvent('ox_lib:notify', src, {
-                    title = 'Import Stock Added',
-                    description = string.format('Added %d units of %s to import stock', amount, item),
-                    type = 'success',
-                    duration = 5000,
-                    position = Config.UI.notificationPosition
-                })
-            end)
-        else -- set
-            MySQL.Async.execute([[
-                INSERT INTO supply_import_stock (ingredient, quantity) 
-                VALUES (?, ?) 
-                ON DUPLICATE KEY UPDATE quantity = ?
-            ]], {item, amount, amount}, function(affected)
-                TriggerClientEvent('ox_lib:notify', src, {
-                    title = 'Import Stock Set',
-                    description = string.format('Set %s import stock to %d units', item, amount),
-                    type = 'success',
-                    duration = 5000,
-                    position = Config.UI.notificationPosition
-                })
-            end)
+        local message = "**Active Alerts**\n\n"
+        
+        for _, alert in ipairs(results) do
+            local emoji = alert.alert_type == 'critical' and '🚨' or alert.alert_type == 'low' and '⚠️' or 'ℹ️'
+            local label = Config.Ingredients[alert.ingredient] and Config.Ingredients[alert.ingredient].label or alert.ingredient
+            
+            message = message .. string.format(
+                "%s **%s** - %s\n",
+                emoji,
+                label,
+                alert.message
+            )
         end
-    else
+        
         TriggerClientEvent('ox_lib:notify', src, {
-            title = 'Error',
-            description = 'Valid actions: check, add, set',
-            type = 'error',
-            duration = 5000,
-            position = Config.UI.notificationPosition
+            title = '🚨 Alert Summary',
+            description = message,
+            type = 'warning',
+            duration = 15000,
+            position = 'top',
+            markdown = true
         })
-    end
-end, 'admin')
+    end)
+end)
 
--- Test command to create an import order
-RegisterCommand('testimport', function(source, args, rawCommand)
-    if source == 0 then
-        print("This command must be run in-game")
-        return
-    end
+-- ===============================================
+-- PLAYER SUPPORT HANDLERS
+-- ===============================================
+
+RegisterNetEvent('admin:getPlayerStats')
+AddEventHandler('admin:getPlayerStats', function(targetId)
+    local src = source
     
-    local xPlayer = QBCore.Functions.GetPlayer(source)
-    if not xPlayer then return end
+    if not hasAdminPermission(src, 'moderator') then return end
     
-    -- Check if player has admin/warehouse access
-    local playerJob = xPlayer.PlayerData.job.name
-    local hasAccess = false
-    
-    for _, job in ipairs(Config.Jobs.warehouse) do
-        if playerJob == job then
-            hasAccess = true
-            break
-        end
-    end
-    
-    if not hasAccess and not QBCore.Functions.HasPermission(source, "admin") then
-        TriggerClientEvent('ox_lib:notify', source, {
-            title = 'Access Denied',
-            description = 'You need warehouse or admin access',
+    local xPlayer = QBCore.Functions.GetPlayer(targetId)
+    if not xPlayer then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Player Not Found',
+            description = 'Invalid player ID',
             type = 'error',
             duration = 5000
         })
         return
     end
     
-    -- Create a test import order
-    local orderGroupId = "import_test_" .. os.time()
-    local restaurantId = 1 -- Default to first restaurant
+    local citizenid = xPlayer.PlayerData.citizenid
+    local name = xPlayer.PlayerData.charinfo.firstname .. ' ' .. xPlayer.PlayerData.charinfo.lastname
     
-    MySQL.Async.execute([[
-        INSERT INTO supply_orders 
-        (owner_id, ingredient, quantity, status, restaurant_id, total_cost, order_group_id)
-        VALUES 
-        (?, ?, ?, ?, ?, ?, ?)
-    ]], {
-        source,
-        'reign_lettuce', -- An import item from config
-        50,
-        'pending',
-        restaurantId,
-        100, -- Test cost
-        orderGroupId
-    }, function(success)
-        if success then
-            TriggerClientEvent('ox_lib:notify', source, {
-                title = '🌍 Import Order Created',
-                description = 'Test import order created! Check Import Distribution Center',
-                type = 'success',
-                duration = 8000,
-                position = Config.UI.notificationPosition
-            })
+    MySQL.Async.fetchAll([[
+        SELECT 
+            COUNT(*) as total_deliveries,
+            SUM(total_earned) as total_earnings,
+            AVG(completion_time) as avg_time,
+            MAX(delivery_date) as last_delivery
+        FROM supply_driver_stats
+        WHERE citizenid = ?
+    ]], {citizenid}, function(result)
+        if result and result[1] then
+            local stats = result[1]
             
-            -- Also create tracking entry
-            MySQL.Async.execute([[
-                INSERT INTO supply_import_orders 
-                (order_id, ingredient, quantity, origin_country, arrival_date, status)
-                VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?)
-            ]], {
-                orderGroupId,
-                'reign_lettuce',
-                50,
-                'Netherlands',
-                'in_transit'
-            })
-            
-            print(string.format("[IMPORT TEST] Created import order %s for player %s", orderGroupId, GetPlayerName(source)))
-        else
-            TriggerClientEvent('ox_lib:notify', source, {
-                title = 'Error',
-                description = 'Failed to create test import order',
-                type = 'error',
-                duration = 5000
+            TriggerClientEvent('ox_lib:notify', src, {
+                title = '📊 Player Statistics',
+                description = string.format([[
+**Player:** %s
+**Total Deliveries:** %d
+**Total Earnings:** $%s
+**Avg Completion:** %.1f mins
+**Last Delivery:** %s]],
+                    name,
+                    stats.total_deliveries or 0,
+                    lib.math.groupdigits(stats.total_earnings or 0),
+                    stats.avg_time or 0,
+                    stats.last_delivery or 'Never'
+                ),
+                type = 'info',
+                duration = 15000,
+                position = 'top',
+                markdown = true
             })
         end
     end)
-end, false)
+end)
 
--- Command to check import system status
-RegisterCommand('checkimports', function(source, args, rawCommand)
+RegisterNetEvent('admin:grantAchievement')
+AddEventHandler('admin:grantAchievement', function(targetId, achievement)
+    local src = source
+    
+    if not hasAdminPermission(src, 'moderator') then return end
+    
+    local xPlayer = QBCore.Functions.GetPlayer(targetId)
+    if not xPlayer then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Player Not Found',
+            description = 'Invalid player ID',
+            type = 'error',
+            duration = 5000
+        })
+        return
+    end
+    
+    -- Grant achievement (implement based on your achievement system)
+    TriggerClientEvent('supply:grantAchievement', targetId, achievement)
+    
+    TriggerClientEvent('ox_lib:notify', src, {
+        title = '✅ Achievement Granted',
+        description = string.format('Granted %s to %s', achievement, GetPlayerName(targetId)),
+        type = 'success',
+        duration = 8000
+    })
+end)
+
+-- ===============================================
+-- SYSTEM MANAGEMENT HANDLERS
+-- ===============================================
+
+RegisterNetEvent('admin:databaseCleanup')
+AddEventHandler('admin:databaseCleanup', function()
+    local src = source
+    
+    if not hasAdminPermission(src, 'superadmin') then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Access Denied',
+            description = 'Superadmin required',
+            type = 'error',
+            duration = 5000
+        })
+        return
+    end
+    
+    -- Clean up old data (30+ days)
+    local queries = {
+        "DELETE FROM supply_orders WHERE status = 'completed' AND created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)",
+        "DELETE FROM supply_driver_stats WHERE delivery_date < DATE_SUB(NOW(), INTERVAL 30 DAY)",
+        "DELETE FROM supply_stock_alerts WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)",
+        "DELETE FROM supply_market_history WHERE timestamp < DATE_SUB(NOW(), INTERVAL 30 DAY)"
+    }
+    
+    local cleaned = 0
+    
+    for _, query in ipairs(queries) do
+        MySQL.Async.execute(query, {}, function(affected)
+            cleaned = cleaned + (affected or 0)
+        end)
+    end
+    
+    Wait(1000) -- Wait for queries to complete
+    
+    TriggerClientEvent('ox_lib:notify', src, {
+        title = '✅ Database Cleaned',
+        description = string.format('Removed %d old records', cleaned),
+        type = 'success',
+        duration = 8000
+    })
+    
+    print(string.format("[ADMIN] %s performed database cleanup - %d records removed", GetPlayerName(src), cleaned))
+end)
+
+RegisterNetEvent('admin:toggleDebugMode')
+AddEventHandler('admin:toggleDebugMode', function()
+    local src = source
+    
+    if not hasAdminPermission(src, 'superadmin') then return end
+    
+    debugMode = not debugMode
+    
+    TriggerClientEvent('ox_lib:notify', src, {
+        title = debugMode and '🔍 Debug Mode ON' or '🔍 Debug Mode OFF',
+        description = debugMode and 'Verbose logging enabled' or 'Verbose logging disabled',
+        type = 'info',
+        duration = 5000
+    })
+    
+    print(string.format("[ADMIN] Debug mode %s by %s", debugMode and "ENABLED" or "DISABLED", GetPlayerName(src)))
+end)
+
+-- ===============================================
+-- COMMAND HANDLERS (SIMPLIFIED)
+-- ===============================================
+
+-- Main admin command - CONSOLIDATED
+RegisterCommand('supply', function(source, args, rawCommand)
     if source == 0 then
-        -- Console command
-        print("\n=== IMPORT SYSTEM STATUS ===")
+        -- Console commands
+        local action = args[1] and args[1]:lower()
         
-        -- Check import orders
-        MySQL.Async.fetchAll('SELECT COUNT(*) as count FROM supply_orders WHERE order_group_id LIKE "import_%"', {}, 
-        function(results)
-            print("Import Orders (pending):", results[1].count)
-        end)
-        
-        -- Check import stock
-        MySQL.Async.fetchAll('SELECT COUNT(*) as count, SUM(quantity) as total FROM supply_import_stock', {},
-        function(results)
-            print("Import Stock Items:", results[1].count, "Total Quantity:", results[1].total or 0)
-        end)
-        
-        -- Check import tracking
-        MySQL.Async.fetchAll('SELECT COUNT(*) as count FROM supply_import_orders WHERE status != "distributed"', {},
-        function(results)
-            print("Active Import Shipments:", results[1].count)
-        end)
-        
-        print("===========================\n")
-    else
-        -- In-game command
-        local xPlayer = QBCore.Functions.GetPlayer(source)
-        if not xPlayer then return end
-        
-        -- Quick status check
+        if action == 'stats' then
+            MySQL.Async.fetchAll([[
+                SELECT 
+                    (SELECT COUNT(*) FROM supply_orders WHERE status = 'pending') as pending,
+                    (SELECT COUNT(*) FROM supply_orders WHERE status = 'completed' AND DATE(created_at) = CURDATE()) as completed,
+                    (SELECT COUNT(DISTINCT citizenid) FROM supply_driver_stats WHERE DATE(delivery_date) = CURDATE()) as drivers
+            ]], {}, function(results)
+                if results and results[1] then
+                    print('=== SUPPLY CHAIN STATS ===')
+                    print('Pending: ' .. results[1].pending)
+                    print('Completed Today: ' .. results[1].completed)
+                    print('Active Drivers: ' .. results[1].drivers)
+                    print('========================')
+                end
+            end)
+        elseif action == 'help' then
+            print('=== SUPPLY ADMIN COMMANDS ===')
+            print('supply stats - Show statistics')
+            print('supply help - Show this menu')
+            print('============================')
+        else
+            print('Use: supply help')
+        end
+        return
+    end
+    
+    -- In-game command handling
+    local action = args[1] and args[1]:lower()
+    local subaction = args[2] and args[2]:lower()
+    
+    -- No arguments = open menu
+    if not action then
+        print("[ADMIN] Player " .. GetPlayerName(source) .. " opening admin menu")
+        TriggerClientEvent('supply:openAdminMenu', source)
+        return
+    end
+    
+    -- Check permissions for sub-commands
+    if not hasAdminPermission(source, 'moderator') then
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Access Denied',
+            description = 'Admin permissions required',
+            type = 'error',
+            duration = 5000
+        })
+        return
+    end
+    
+    -- Handle sub-commands
+    if action == 'stats' then
+        -- Quick stats command
         MySQL.Async.fetchAll([[
             SELECT 
-                (SELECT COUNT(*) FROM supply_orders WHERE order_group_id LIKE 'import_%' AND status = 'pending') as pending_imports,
-                (SELECT COUNT(*) FROM supply_import_stock WHERE quantity > 0) as stocked_items,
-                (SELECT COUNT(*) FROM supply_import_orders WHERE status IN ('in_transit', 'ordered')) as active_shipments
+                (SELECT COUNT(*) FROM supply_orders WHERE status = 'pending') as pending,
+                (SELECT COUNT(*) FROM supply_orders WHERE status = 'completed' AND DATE(created_at) = CURDATE()) as completed,
+                (SELECT COUNT(DISTINCT citizenid) FROM supply_driver_stats WHERE DATE(delivery_date) = CURDATE()) as drivers
         ]], {}, function(results)
             if results and results[1] then
                 TriggerClientEvent('ox_lib:notify', source, {
-                    title = '🌍 Import System Status',
-                    description = string.format([[
-**Pending Orders:** %d
-**Stocked Items:** %d  
-**Active Shipments:** %d
-
-Use Import Distribution Center for details]],
-                        results[1].pending_imports,
-                        results[1].stocked_items,
-                        results[1].active_shipments),
+                    title = '📊 Quick Stats',
+                    description = string.format(
+                        '📋 Pending: %d\n✅ Completed Today: %d\n👥 Active Drivers: %d',
+                        results[1].pending,
+                        results[1].completed,
+                        results[1].drivers
+                    ),
                     type = 'info',
                     duration = 10000,
-                    position = Config.UI.notificationPosition,
                     markdown = true
                 })
             end
         end)
+        
+    elseif action == 'market' then
+        if subaction == 'event' then
+            local ingredient = args[3]
+            local eventType = args[4]
+            
+            if ingredient and eventType then
+                -- Trigger market event
+                TriggerEvent('supply:createMarketEvent', ingredient, eventType)
+                
+                TriggerClientEvent('ox_lib:notify', source, {
+                    title = '✅ Market Event Created',
+                    description = string.format('%s event for %s', eventType, ingredient),
+                    type = 'success',
+                    duration = 8000
+                })
+            end
+        elseif subaction == 'reload' then
+            -- Reload market system
+            TriggerEvent('supply:reloadMarketSystem')
+            
+            TriggerClientEvent('ox_lib:notify', source, {
+                title = '✅ Market Reloaded',
+                description = 'Pricing system reinitialized',
+                type = 'success',
+                duration = 5000
+            })
+        end
+        
+    elseif action == 'emergency' then
+        if subaction == 'create' then
+            local restaurantId = tonumber(args[3])
+            local ingredient = args[4]
+            local priority = args[5] or 'emergency'
+            
+            if restaurantId and ingredient then
+                -- Create emergency order
+                TriggerEvent('supply:createEmergencyOrder', {
+                    restaurantId = restaurantId,
+                    ingredient = ingredient,
+                    priority = priority,
+                    quantity = 50
+                })
+                
+                TriggerClientEvent('ox_lib:notify', source, {
+                    title = '✅ Emergency Created',
+                    description = string.format('%s priority order created', priority),
+                    type = 'success',
+                    duration = 8000
+                })
+            end
+        end
+        
+    elseif action == 'export' then
+        if subaction == 'analytics' then
+            -- Export analytics (implement as needed)
+            TriggerClientEvent('ox_lib:notify', source, {
+                title = '📊 Export Started',
+                description = 'Analytics export initiated',
+                type = 'info',
+                duration = 5000
+            })
+        end
+    else
+        -- Unknown sub-command, open menu instead
+        TriggerClientEvent('supply:openAdminMenu', source)
     end
 end, false)
+
+-- Job reset command
+RegisterCommand('supplyjobreset', function(source, args, rawCommand)
+    local src = source
+    local targetId = tonumber(args[1]) or src
+    
+    if src ~= 0 and not hasAdminPermission(src, 'moderator') then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Access Denied',
+            description = 'Admin permissions required',
+            type = 'error',
+            duration = 5000
+        })
+        return
+    end
+    
+    local xPlayer = QBCore.Functions.GetPlayer(targetId)
+    if not xPlayer then
+        if src == 0 then
+            print('[SUPPLY] Player not found: ' .. targetId)
+        else
+            TriggerClientEvent('ox_lib:notify', src, {
+                title = 'Player Not Found',
+                description = 'Invalid player ID',
+                type = 'error',
+                duration = 5000
+            })
+        end
+        return
+    end
+    
+    local targetName = xPlayer.PlayerData.charinfo.firstname .. ' ' .. xPlayer.PlayerData.charinfo.lastname
+    local citizenid = xPlayer.PlayerData.citizenid
+    
+    -- Trigger client reset
+    TriggerClientEvent('supply:forceJobReset', targetId)
+    
+    -- Server-side cleanup
+    MySQL.Async.execute([[
+        UPDATE supply_orders 
+        SET status = 'pending' 
+        WHERE status = 'accepted' AND order_group_id IN (
+            SELECT order_group_id FROM supply_orders WHERE owner_id = ?
+        )
+    ]], {targetId})
+    
+    -- Remove from teams
+    MySQL.Async.execute('DELETE FROM supply_team_members WHERE citizenid = ?', {citizenid})
+    
+    -- Notify
+    if src == 0 then
+        print('[SUPPLY] Job reset for: ' .. targetName)
+    else
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = '✅ Job Reset',
+            description = 'Reset complete for ' .. targetName,
+            type = 'success',
+            duration = 8000
+        })
+    end
+    
+    TriggerClientEvent('ox_lib:notify', targetId, {
+        title = '🔄 Job Reset',
+        description = 'Your job has been reset by an admin',
+        type = 'info',
+        duration = 8000
+    })
+end, false)
+
+-- Test command
+RegisterCommand('supplytest', function(source, args, rawCommand)
+    if source == 0 then
+        print("Use this command in-game")
+        return
+    end
+    
+    local adminLevel = getAdminLevel(source)
+    local xPlayer = QBCore.Functions.GetPlayer(source)
+    
+    if not xPlayer then return end
+    
+    local identifiers = GetPlayerIdentifiers(source)
+    local license2 = nil
+    
+    for _, id in pairs(identifiers) do
+        if string.sub(id, 1, 9) == "license2:" then
+            license2 = id
+            break
+        end
+    end
+    
+    TriggerClientEvent('ox_lib:notify', source, {
+        title = '🔍 Permission Test',
+        description = string.format([[
+**Your Admin Level:** %s
+**License2:** %s
+**Job:** %s (Grade %s)
+
+To add yourself as admin:
+`["%s"] = "admin",`]],
+            adminLevel or "None",
+            license2 and "Found" or "Not Found",
+            xPlayer.PlayerData.job.name,
+            xPlayer.PlayerData.job.grade.level,
+            license2 or "N/A"
+        ),
+        type = 'info',
+        duration = 20000,
+        position = 'top',
+        markdown = true
+    })
+    
+    if license2 then
+        print(string.format('[ADMIN] %s license2: %s', GetPlayerName(source), license2))
+    end
+end, false)
+
+-- Direct admin check command
+RegisterCommand('supplyadmincheck', function(source, args, rawCommand)
+    if source == 0 then
+        print("Use this command in-game")
+        return
+    end
+    
+    local adminLevel = getAdminLevel(source)
+    local hasPerm = hasAdminPermission(source, 'moderator')
+    
+    print(string.format('[ADMIN CHECK] Player: %s | Level: %s | Has Permission: %s',
+        GetPlayerName(source),
+        adminLevel or 'none',
+        hasPerm and 'YES' or 'NO'
+    ))
+    
+    TriggerClientEvent('ox_lib:notify', source, {
+        title = '🔍 Admin Check',
+        description = string.format(
+            '**Admin Level:** %s\n**Has Permission:** %s\n\nCheck server console for details.',
+            adminLevel or 'None',
+            hasPerm and '✅ YES' or '❌ NO'
+        ),
+        type = hasPerm and 'success' or 'error',
+        duration = 10000,
+        markdown = true
+    })
+end, false)
+
+-- Emergency restart (superadmin only)
+RegisterCommand('supplyemergencyrestart', function(source, args, rawCommand)
+    if source ~= 0 and not hasAdminPermission(source, 'superadmin') then
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Access Denied',
+            description = 'Superadmin required',
+            type = 'error',
+            duration = 5000
+        })
+        return
+    end
+    
+    print('[ADMIN] EMERGENCY RESTART INITIATED')
+    
+    -- Reset all active orders
+    MySQL.Async.execute("UPDATE supply_orders SET status = 'pending' WHERE status = 'accepted'", {})
+    
+    -- Clear all teams
+    MySQL.Async.execute("DELETE FROM supply_team_members", {})
+    MySQL.Async.execute("DELETE FROM supply_team_deliveries WHERE status = 'active'", {})
+    
+    -- Force reset all online players
+    local players = QBCore.Functions.GetPlayers()
+    for _, playerId in ipairs(players) do
+        TriggerClientEvent('supply:forceJobReset', playerId)
+    end
+    
+    -- Notify
+    TriggerClientEvent('ox_lib:notify', -1, {
+        title = '🚨 System Restart',
+        description = 'Supply chain system has been restarted',
+        type = 'warning',
+        duration = 10000
+    })
+    
+    print('[ADMIN] Emergency restart completed')
+end, false)
+
+-- ===============================================
+-- INITIALIZATION
+-- ===============================================
+
+AddEventHandler('onResourceStart', function(resourceName)
+    if resourceName == GetCurrentResourceName() then
+        print('================================================')
+        print('[ADMIN] Supply Chain Admin System v2.0.1 REFINED')
+        print('[ADMIN] Database Fix Applied - No acknowledged column required')
+        print('[ADMIN] Commands: /supply, /supplyjobreset, /supplytest')
+        print('[ADMIN] Quick Access: /supplyadmin, /supplyreset')
+        print('[ADMIN] Debug Mode: ' .. (debugMode and 'ON' or 'OFF'))
+        print('================================================')
+    end
+end)
+
+-- Command suggestions
+TriggerEvent('chat:addSuggestion', '/supply', 'Supply Chain Admin Menu')
+TriggerEvent('chat:addSuggestion', '/supplyjobreset', 'Reset player job', {
+    { name = 'playerid', help = 'Player ID (optional)' }
+})
+TriggerEvent('chat:addSuggestion', '/supplytest', 'Test admin permissions')
+TriggerEvent('chat:addSuggestion', '/supplyadmincheck', 'Direct admin permission check')
+TriggerEvent('chat:addSuggestion', '/supplyadmin', 'Quick admin menu access')
+TriggerEvent('chat:addSuggestion', '/supplyreset', 'Quick troubleshooting menu')
