@@ -109,6 +109,316 @@ local function calculateDeliveryInfo(orderGroup)
     }
 end
 
+-- ===================================
+-- ENHANCED STOCK VIEWING SYSTEM
+-- ===================================
+
+-- Get category stock with visual data
+RegisterNetEvent('warehouse:requestCategoryStock')
+AddEventHandler('warehouse:requestCategoryStock', function(warehouseId, category)
+    local src = source
+    if not hasWarehouseAccess(src) then
+        return
+    end
+    
+    -- Determine which stock table to use
+    local stockTable = warehouseId == 2 and 'supply_import_stock' or 'supply_warehouse_stock'
+    
+    -- Get all items for all restaurant jobs in this category
+    local categoryItems = {}
+    for restaurantId, restaurant in pairs(Config.Restaurants) do
+        local jobItems = Config.Items[restaurant.job]
+        if jobItems and jobItems[category] then
+            for itemName, itemData in pairs(jobItems[category]) do
+                categoryItems[itemName:lower()] = itemData
+            end
+        end
+    end
+    
+    -- Get stock data for these items
+    local stockData = {}
+    local itemNames = exports.ox_inventory:Items() or {}
+    
+    for itemName, itemConfig in pairs(categoryItems) do
+        MySQL.Async.fetchAll([[
+            SELECT 
+                ws.ingredient,
+                ws.quantity,
+                COALESCE(ms.max_stock, 500) as max_stock
+            FROM ]] .. stockTable .. [[ ws
+            LEFT JOIN supply_market_settings ms ON ws.ingredient = ms.ingredient
+            WHERE ws.ingredient = ?
+        ]], {itemName}, function(results)
+            if results and results[1] then
+                local item = results[1]
+                local percentage = (item.quantity / item.max_stock) * 100
+                
+                table.insert(stockData, {
+                    ingredient = item.ingredient,
+                    label = itemNames[item.ingredient] and itemNames[item.ingredient].label or itemConfig.label or item.ingredient,
+                    quantity = item.quantity,
+                    price = itemConfig.price or 0,
+                    percentage = percentage,
+                    isImport = itemConfig.import or false
+                })
+            end
+        end)
+    end
+    
+    -- Wait for queries to complete
+    Citizen.SetTimeout(500, function()
+        TriggerClientEvent('warehouse:showCategoryStock', src, warehouseId, category, stockData)
+    end)
+end)
+
+-- Get stock summary
+RegisterNetEvent('warehouse:requestStockSummary')
+AddEventHandler('warehouse:requestStockSummary', function(warehouseId)
+    local src = source
+    if not hasWarehouseAccess(src) then
+        return
+    end
+    
+    -- Determine which stock table to use
+    local stockTable = warehouseId == 2 and 'supply_import_stock' or 'supply_warehouse_stock'
+    
+    MySQL.Async.fetchAll('SELECT * FROM ' .. stockTable, {}, function(results)
+        local summaryData = {
+            totalItems = 0,
+            totalValue = 0,
+            categoryCount = 0,
+            categories = {},
+            stockHealth = {
+                critical = 0,
+                low = 0,
+                healthy = 0
+            }
+        }
+        
+        local itemNames = exports.ox_inventory:Items() or {}
+        
+        -- Process each stock item
+        for _, stockItem in ipairs(results) do
+            local ingredient = stockItem.ingredient:lower()
+            local quantity = stockItem.quantity
+            
+            -- Find which category this item belongs to
+            local foundCategory = nil
+            local itemConfig = nil
+            
+            for restaurantId, restaurant in pairs(Config.Restaurants) do
+                local jobItems = Config.Items[restaurant.job]
+                if jobItems then
+                    for category, categoryItems in pairs(jobItems) do
+                        if categoryItems[ingredient] then
+                            foundCategory = category
+                            itemConfig = categoryItems[ingredient]
+                            break
+                        end
+                    end
+                end
+                if foundCategory then break end
+            end
+            
+            if foundCategory and itemConfig then
+                -- Initialize category if needed
+                if not summaryData.categories[foundCategory] then
+                    summaryData.categories[foundCategory] = {
+                        items = 0,
+                        value = 0
+                    }
+                    summaryData.categoryCount = summaryData.categoryCount + 1
+                end
+                
+                -- Update totals
+                local itemValue = quantity * (itemConfig.price or 0)
+                summaryData.totalItems = summaryData.totalItems + quantity
+                summaryData.totalValue = summaryData.totalValue + itemValue
+                summaryData.categories[foundCategory].items = summaryData.categories[foundCategory].items + quantity
+                summaryData.categories[foundCategory].value = summaryData.categories[foundCategory].value + itemValue
+                
+                -- Check stock health
+                MySQL.Async.fetchScalar('SELECT max_stock FROM supply_market_settings WHERE ingredient = ?', 
+                {ingredient}, function(maxStock)
+                    maxStock = maxStock or 500
+                    local percentage = (quantity / maxStock) * 100
+                    
+                    if percentage <= 20 then
+                        summaryData.stockHealth.critical = summaryData.stockHealth.critical + 1
+                    elseif percentage <= 50 then
+                        summaryData.stockHealth.low = summaryData.stockHealth.low + 1
+                    else
+                        summaryData.stockHealth.healthy = summaryData.stockHealth.healthy + 1
+                    end
+                end)
+            end
+        end
+        
+        -- Send summary after short delay for health calculations
+        Citizen.SetTimeout(500, function()
+            TriggerClientEvent('warehouse:showStockSummary', src, warehouseId, summaryData)
+        end)
+    end)
+end)
+
+-- Handle order menu request with warehouse context
+RegisterNetEvent('warehouse:requestOrdersMenu')
+AddEventHandler('warehouse:requestOrdersMenu', function(warehouseId)
+    local playerId = source
+    if not hasWarehouseAccess(playerId) then
+        return
+    end
+    
+    -- Store the warehouse context for this player
+    -- This ensures orders are filtered correctly
+    
+    -- Build query based on warehouse location
+    local queryCondition = ""
+    if warehouseId == 2 then
+        -- Import warehouse - only show import orders
+        queryCondition = "WHERE status = 'pending' AND order_group_id LIKE 'import_%'"
+    else
+        -- Regular warehouse - exclude import orders
+        queryCondition = "WHERE status = 'pending' AND (order_group_id NOT LIKE 'import_%' OR order_group_id IS NULL)"
+    end
+    
+    MySQL.Async.fetchAll('SELECT * FROM supply_orders ' .. queryCondition, {}, function(results)
+        if not results then
+            print("[ERROR] No results from supply_orders query")
+            return
+        end
+        
+        local ordersByGroup = {}
+        local itemNames = exports.ox_inventory:Items() or {}
+        
+        for _, order in ipairs(results) do
+            local restaurantJob = Config.Restaurants[order.restaurant_id] and Config.Restaurants[order.restaurant_id].job
+            if restaurantJob then
+                local itemKey = order.ingredient:lower()
+                local item = nil
+                
+                -- Find item in categories
+                for category, categoryItems in pairs(Config.Items[restaurantJob]) do
+                    if categoryItems[itemKey] then
+                        item = categoryItems[itemKey]
+                        break
+                    end
+                end
+                
+                local itemLabel = itemNames[itemKey] and itemNames[itemKey].label or (item and item.label) or itemKey
+
+                if item then
+                    local orderGroupId = order.order_group_id or tostring(order.id)
+                    if not ordersByGroup[orderGroupId] then
+                        ordersByGroup[orderGroupId] = {
+                            orderGroupId = orderGroupId,
+                            id = order.id,
+                            ownerId = order.owner_id,
+                            restaurantId = order.restaurant_id,
+                            totalCost = 0,
+                            items = {},
+                            isImport = string.find(orderGroupId, "import_") ~= nil
+                        }
+                    end
+                    table.insert(ordersByGroup[orderGroupId].items, {
+                        id = order.id,
+                        itemName = itemKey,
+                        itemLabel = itemLabel,
+                        quantity = order.quantity,
+                        totalCost = order.total_cost,
+                        isImport = item.import or false
+                    })
+                    ordersByGroup[orderGroupId].totalCost = ordersByGroup[orderGroupId].totalCost + order.total_cost
+                else
+                    print("[ERROR] Item not found: ", itemKey, " for job: ", restaurantJob)
+                end
+            else
+                print("[ERROR] Invalid restaurant job for restaurant_id: ", order.restaurant_id)
+            end
+        end
+        
+        local orders = {}
+        for _, orderGroup in pairs(ordersByGroup) do
+            -- Add delivery calculation info
+            local deliveryInfo = calculateDeliveryInfo(orderGroup)
+            orderGroup.deliveryInfo = deliveryInfo
+            
+            -- Add warehouse info
+            orderGroup.warehouseId = warehouseId
+            orderGroup.warehouseName = warehouseId == 2 and "Import Distribution Center" or "Main Warehouse"
+            
+            table.insert(orders, orderGroup)
+        end
+        
+        -- Add warehouse info to client display
+        if #orders == 0 then
+            local warehouseName = warehouseId == 2 and "Import Distribution Center" or "Main Warehouse"
+            TriggerClientEvent('ox_lib:notify', playerId, {
+                title = 'No Orders',
+                description = 'No pending orders for ' .. warehouseName,
+                type = 'info',
+                duration = 5000,
+                position = Config.UI.notificationPosition
+            })
+        end
+        
+        TriggerClientEvent('warehouse:showOrderDetails', playerId, orders)
+    end)
+end)
+
+-- Stock alerts handler (only for main warehouse)
+RegisterNetEvent('stockalerts:getDashboard')
+AddEventHandler('stockalerts:getDashboard', function()
+    local src = source
+    if not hasWarehouseAccess(src) then
+        return
+    end
+    
+    TriggerEvent('stockalerts:getAlerts') -- Use existing handler
+end)
+
+-- Import tracking simulation (for testing)
+RegisterNetEvent('imports:simulateArrival')
+AddEventHandler('imports:simulateArrival', function()
+    local src = source
+    if not hasWarehouseAccess(src) then
+        return
+    end
+    
+    -- Simulate an import arrival
+    local testImportOrder = {
+        order_id = "IMP_" .. os.time(),
+        ingredient = "reign_lettuce",
+        quantity = 500,
+        origin_country = "Netherlands",
+        arrival_date = os.time() + 3600, -- 1 hour from now
+        status = "in_transit"
+    }
+    
+    MySQL.Async.execute([[
+        INSERT INTO supply_import_orders 
+        (order_id, ingredient, quantity, origin_country, arrival_date, status)
+        VALUES (?, ?, ?, ?, FROM_UNIXTIME(?), ?)
+    ]], {
+        testImportOrder.order_id,
+        testImportOrder.ingredient,
+        testImportOrder.quantity,
+        testImportOrder.origin_country,
+        testImportOrder.arrival_date,
+        testImportOrder.status
+    }, function(success)
+        if success then
+            TriggerClientEvent('ox_lib:notify', src, {
+                title = '🌍 Import Simulated',
+                description = 'Test import order created for tracking',
+                type = 'success',
+                duration = 5000,
+                position = Config.UI.notificationPosition
+            })
+        end
+    end)
+end)
+
 -- Get Pending Orders
 RegisterNetEvent('warehouse:getPendingOrders')
 AddEventHandler('warehouse:getPendingOrders', function()

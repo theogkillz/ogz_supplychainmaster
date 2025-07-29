@@ -85,7 +85,7 @@ local function analyzeUsagePatterns(itemName)
         end
         
         local avgDailyUsage = totalUsage / #results
-        local avgOrdersPerDay = (#ordersByDay > 0) and (table.concat(ordersByDay, "+") / #ordersByDay) or 0
+        -- local avgOrdersPerDay = (#ordersByDay > 0) and (table.concat(ordersByDay, "+") / #ordersByDay) or 0
         
         -- Calculate variance for confidence
         local variance = 0

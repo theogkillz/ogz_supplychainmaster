@@ -406,6 +406,258 @@ AddEventHandler('notifications:updatePreferences', function(preferences)
     })
 end)
 
+-- Enhanced Market Event Notifications for Restaurant Owners
+RegisterNetEvent('notifications:marketEventEmail')
+AddEventHandler('notifications:marketEventEmail', function(eventType, ingredient, oldPrice, newPrice, percentage)
+    local itemNames = exports.ox_inventory:Items() or {}
+    local itemLabel = itemNames[ingredient] and itemNames[ingredient].label or ingredient
+    local change = ((newPrice - oldPrice) / oldPrice) * 100
+    
+    -- Get all players
+    local players = QBCore.Functions.GetPlayers()
+    
+    for _, playerId in ipairs(players) do
+        local xPlayer = QBCore.Functions.GetPlayer(playerId)
+        if xPlayer then
+            local playerJob = xPlayer.PlayerData.job
+            
+            -- Check if player is a restaurant owner/boss
+            local isRestaurantBoss = false
+            local restaurantName = ""
+            
+            for restaurantId, restaurant in pairs(Config.Restaurants) do
+                if restaurant.job == playerJob.name and playerJob.isboss then
+                    isRestaurantBoss = true
+                    restaurantName = restaurant.name
+                    
+                    -- Check if this ingredient is used by their restaurant
+                    local usesIngredient = false
+                    local restaurantItems = Config.Items[playerJob.name] or {}
+                    
+                    for category, categoryItems in pairs(restaurantItems) do
+                        if categoryItems[ingredient] then
+                            usesIngredient = true
+                            break
+                        end
+                    end
+                    
+                    if usesIngredient then
+                        -- Send email notification
+                        local urgencyIcon = eventType == "shortage" and "🔴" or "🟢"
+                        local actionText = eventType == "shortage" and "Stock up before prices rise further!" or "Great time to buy in bulk!"
+                        
+                        local subject = string.format("%s Market %s: %s %+.0f%%", 
+                            urgencyIcon, eventType:upper(), itemLabel, change)
+                        
+                        local message = string.format([[
+%s MARKET ALERT - %s %s
+
+Your restaurant uses *%s* and there's a significant market event!
+
+=== 📊 PRICE UPDATE ===
+Previous Price: $%d
+Current Price: $%d
+Change: %+.0f%%
+Stock Level: %.1f%%
+
+=== 💡 RECOMMENDATION ===
+%s
+
+%s
+
+--- Why This Matters ---
+%s
+
+_Market Intelligence System - %s_
+                        ]], urgencyIcon, itemLabel, eventType:upper(),
+                        itemLabel, oldPrice, newPrice, change, percentage,
+                        eventType == "shortage" 
+                            and string.format("⚠️ URGENT: Order at least %d units NOW to lock in current prices!", math.ceil(100 * (100/percentage)))
+                            or string.format("✅ OPPORTUNITY: Consider ordering %d+ units while prices are low!", 200),
+                        actionText,
+                        eventType == "shortage"
+                            and "Shortages typically last 2-3 days with prices increasing 5-10% daily. Acting now saves money!"
+                            or "Surplus events are temporary! Prices typically return to normal within 24-48 hours.",
+                        restaurantName)
+                        
+                        -- Use LBPhone integration to send email
+                        local LBPhone = _G.LBPhone
+                        if LBPhone then
+                            LBPhone.SendDutyEmail(playerId, {
+                                subject = subject,
+                                message = message,
+                                sender = "market@supply.chain",
+                                senderName = "Market Intelligence"
+                            })
+                        end
+                    end
+                    
+                    break -- Found their restaurant, no need to check others
+                end
+            end
+        end
+    end
+end)
+
+-- Stock Delivery Notification Email
+RegisterNetEvent('notifications:stockDeliveryEmail')
+AddEventHandler('notifications:stockDeliveryEmail', function(restaurantId, deliveryData)
+    local restaurantData = Config.Restaurants[restaurantId]
+    if not restaurantData then return end
+    
+    local restaurantName = restaurantData.name
+    local restaurantJob = restaurantData.job
+    
+    -- Get all players with this restaurant job
+    local players = QBCore.Functions.GetPlayers()
+    local itemNames = exports.ox_inventory:Items() or {}
+    
+    for _, playerId in ipairs(players) do
+        local xPlayer = QBCore.Functions.GetPlayer(playerId)
+        if xPlayer and xPlayer.PlayerData.job.name == restaurantJob then
+            -- Build delivery summary
+            local itemsList = ""
+            local totalValue = 0
+            local totalItems = 0
+            
+            for _, item in ipairs(deliveryData.items) do
+                local itemLabel = itemNames[item.ingredient] and itemNames[item.ingredient].label or item.ingredient
+                itemsList = itemsList .. string.format("• %s x%d ($%d)\n", 
+                    itemLabel, item.quantity, item.cost)
+                totalValue = totalValue + item.cost
+                totalItems = totalItems + item.quantity
+            end
+            
+            -- Determine delivery type icon
+            local deliveryIcon = deliveryData.isImport and "🌍" or "📦"
+            local deliveryType = deliveryData.isImport and "Import" or "Regular"
+            
+            local subject = string.format("%s Stock Delivered - %d items ($%d)", 
+                deliveryIcon, totalItems, totalValue)
+            
+            local message = string.format([[
+%s DELIVERY CONFIRMATION %s
+
+Your %s order has been delivered to %s!
+
+=== 📋 DELIVERED ITEMS ===
+%s
+------------------------
+Total Items: %d
+Total Value: $%d
+
+=== 🚚 DELIVERY DETAILS ===
+Driver: %s
+Delivery Time: %s
+Performance: %s
+Boxes Delivered: %d
+
+=== 📦 STOCK UPDATE ===
+All items have been added to your restaurant inventory.
+Check your stock menu to verify receipt.
+
+%s
+
+_Thank you for choosing our supply chain services!_
+            ]], deliveryIcon, deliveryIcon, deliveryType, restaurantName,
+            itemsList, totalItems, totalValue,
+            deliveryData.driverName or "Professional Driver",
+            deliveryData.deliveryTime or "Just now",
+            deliveryData.rating or "⭐⭐⭐⭐⭐ Excellent",
+            deliveryData.boxes or 1,
+            deliveryData.isImport and "\n🌍 _Premium import items delivered with care_" or "")
+            
+            -- Send using LBPhone integration
+            local LBPhone = _G.LBPhone
+            if LBPhone then
+                LBPhone.SendDutyEmail(playerId, {
+                    subject = subject,
+                    message = message,
+                    sender = "delivery@supply.chain",
+                    senderName = "Delivery Confirmation"
+                })
+            end
+            
+            -- Also send a quick notification
+            TriggerClientEvent('ox_lib:notify', playerId, {
+                title = deliveryIcon .. ' Stock Delivered!',
+                description = string.format('%d items delivered ($%d)', totalItems, totalValue),
+                type = 'success',
+                duration = 8000,
+                position = Config.UI.notificationPosition,
+                markdown = Config.UI.enableMarkdown
+            })
+        end
+    end
+end)
+
+-- Emergency Stock Alert Email (Enhanced)
+RegisterNetEvent('notifications:emergencyStockEmail')
+AddEventHandler('notifications:emergencyStockEmail', function(restaurantId, criticalItem)
+    local restaurantData = Config.Restaurants[restaurantId]
+    if not restaurantData then return end
+    
+    local restaurantJob = restaurantData.job
+    local itemNames = exports.ox_inventory:Items() or {}
+    local itemLabel = itemNames[criticalItem.ingredient] and itemNames[criticalItem.ingredient].label or criticalItem.ingredient
+    
+    -- Get restaurant bosses
+    local players = QBCore.Functions.GetPlayers()
+    
+    for _, playerId in ipairs(players) do
+        local xPlayer = QBCore.Functions.GetPlayer(playerId)
+        if xPlayer and xPlayer.PlayerData.job.name == restaurantJob and xPlayer.PlayerData.job.isboss then
+            
+            local subject = string.format("🚨 CRITICAL: %s stock at %d%%!", 
+                itemLabel, criticalItem.percentage)
+            
+            local message = string.format([[
+🚨 CRITICAL STOCK EMERGENCY 🚨
+
+IMMEDIATE ACTION REQUIRED!
+
+*%s* is critically low at your restaurant!
+
+=== ⚠️ CURRENT SITUATION ===
+Item: %s
+Current Stock: %d units
+Stock Level: %d%%
+Status: CRITICAL - Will run out soon!
+
+=== 🎯 IMMEDIATE ACTIONS ===
+1. Place an EMERGENCY ORDER now
+2. Consider ordering 2-3x normal quantity
+3. Check for market prices before ordering
+4. Alert your staff about the shortage
+
+=== 💰 EMERGENCY ORDER OPTIONS ===
+• Quick Order: %d units for $%d
+• Recommended: %d units for $%d
+• Bulk Safety: %d units for $%d
+
+⏰ ACT NOW to avoid running out completely!
+
+_This is an automated critical alert from your inventory system_
+            ]], itemLabel, itemLabel, 
+            criticalItem.currentStock, criticalItem.percentage,
+            50, 50 * criticalItem.price,
+            150, 150 * criticalItem.price,
+            300, 300 * criticalItem.price)
+            
+            -- Send using LBPhone integration
+            local LBPhone = _G.LBPhone
+            if LBPhone then
+                LBPhone.SendDutyEmail(playerId, {
+                    subject = subject,
+                    message = message,
+                    sender = "alerts@supply.chain",
+                    senderName = "Critical Alert System"
+                })
+            end
+        end
+    end
+end)
+
 -- Achievement unlock notifications
 local function sendAchievementNotification(citizenid, newTier, oldTier)
     local src = QBCore.Functions.GetPlayerByCitizenId(citizenid)

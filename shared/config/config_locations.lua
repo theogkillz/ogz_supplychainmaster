@@ -112,8 +112,8 @@ Config.Location = {
     heading = 221.43
 }
 Config.SellerBlip = {
-    label = 'Distributor',
-    coords = vector3(-88.4297, 6493.5161, 30.1007),
+    label = 'Ingredient Distributor',
+    coords = vector3(-86.59, 6494.08, 31.51),
     blipSprite = 1,
     blipColor = 1,
     blipScale = 0.6

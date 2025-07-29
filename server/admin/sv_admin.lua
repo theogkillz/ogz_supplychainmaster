@@ -608,3 +608,145 @@ QBCore.Commands.Add('importstock', 'Manage import warehouse stock (Admin Only)',
         })
     end
 end, 'admin')
+
+-- Test command to create an import order
+RegisterCommand('testimport', function(source, args, rawCommand)
+    if source == 0 then
+        print("This command must be run in-game")
+        return
+    end
+    
+    local xPlayer = QBCore.Functions.GetPlayer(source)
+    if not xPlayer then return end
+    
+    -- Check if player has admin/warehouse access
+    local playerJob = xPlayer.PlayerData.job.name
+    local hasAccess = false
+    
+    for _, job in ipairs(Config.Jobs.warehouse) do
+        if playerJob == job then
+            hasAccess = true
+            break
+        end
+    end
+    
+    if not hasAccess and not QBCore.Functions.HasPermission(source, "admin") then
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Access Denied',
+            description = 'You need warehouse or admin access',
+            type = 'error',
+            duration = 5000
+        })
+        return
+    end
+    
+    -- Create a test import order
+    local orderGroupId = "import_test_" .. os.time()
+    local restaurantId = 1 -- Default to first restaurant
+    
+    MySQL.Async.execute([[
+        INSERT INTO supply_orders 
+        (owner_id, ingredient, quantity, status, restaurant_id, total_cost, order_group_id)
+        VALUES 
+        (?, ?, ?, ?, ?, ?, ?)
+    ]], {
+        source,
+        'reign_lettuce', -- An import item from config
+        50,
+        'pending',
+        restaurantId,
+        100, -- Test cost
+        orderGroupId
+    }, function(success)
+        if success then
+            TriggerClientEvent('ox_lib:notify', source, {
+                title = '🌍 Import Order Created',
+                description = 'Test import order created! Check Import Distribution Center',
+                type = 'success',
+                duration = 8000,
+                position = Config.UI.notificationPosition
+            })
+            
+            -- Also create tracking entry
+            MySQL.Async.execute([[
+                INSERT INTO supply_import_orders 
+                (order_id, ingredient, quantity, origin_country, arrival_date, status)
+                VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), ?)
+            ]], {
+                orderGroupId,
+                'reign_lettuce',
+                50,
+                'Netherlands',
+                'in_transit'
+            })
+            
+            print(string.format("[IMPORT TEST] Created import order %s for player %s", orderGroupId, GetPlayerName(source)))
+        else
+            TriggerClientEvent('ox_lib:notify', source, {
+                title = 'Error',
+                description = 'Failed to create test import order',
+                type = 'error',
+                duration = 5000
+            })
+        end
+    end)
+end, false)
+
+-- Command to check import system status
+RegisterCommand('checkimports', function(source, args, rawCommand)
+    if source == 0 then
+        -- Console command
+        print("\n=== IMPORT SYSTEM STATUS ===")
+        
+        -- Check import orders
+        MySQL.Async.fetchAll('SELECT COUNT(*) as count FROM supply_orders WHERE order_group_id LIKE "import_%"', {}, 
+        function(results)
+            print("Import Orders (pending):", results[1].count)
+        end)
+        
+        -- Check import stock
+        MySQL.Async.fetchAll('SELECT COUNT(*) as count, SUM(quantity) as total FROM supply_import_stock', {},
+        function(results)
+            print("Import Stock Items:", results[1].count, "Total Quantity:", results[1].total or 0)
+        end)
+        
+        -- Check import tracking
+        MySQL.Async.fetchAll('SELECT COUNT(*) as count FROM supply_import_orders WHERE status != "distributed"', {},
+        function(results)
+            print("Active Import Shipments:", results[1].count)
+        end)
+        
+        print("===========================\n")
+    else
+        -- In-game command
+        local xPlayer = QBCore.Functions.GetPlayer(source)
+        if not xPlayer then return end
+        
+        -- Quick status check
+        MySQL.Async.fetchAll([[
+            SELECT 
+                (SELECT COUNT(*) FROM supply_orders WHERE order_group_id LIKE 'import_%' AND status = 'pending') as pending_imports,
+                (SELECT COUNT(*) FROM supply_import_stock WHERE quantity > 0) as stocked_items,
+                (SELECT COUNT(*) FROM supply_import_orders WHERE status IN ('in_transit', 'ordered')) as active_shipments
+        ]], {}, function(results)
+            if results and results[1] then
+                TriggerClientEvent('ox_lib:notify', source, {
+                    title = '🌍 Import System Status',
+                    description = string.format([[
+**Pending Orders:** %d
+**Stocked Items:** %d  
+**Active Shipments:** %d
+
+Use Import Distribution Center for details]],
+                        results[1].pending_imports,
+                        results[1].stocked_items,
+                        results[1].active_shipments),
+                    type = 'info',
+                    duration = 10000,
+                    position = Config.UI.notificationPosition,
+                    markdown = true
+                })
+            end
+        end)
+    end
+end, false)
