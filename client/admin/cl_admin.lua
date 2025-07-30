@@ -20,20 +20,53 @@ local function getIngredientOptions()
         return ingredientLabels
     end
     
-    -- Build options from Config with proper labels
-    if Config.Ingredients then
-        for name, data in pairs(Config.Ingredients) do
-            table.insert(ingredientLabels, {
-                value = name,
-                label = data.label or name
-            })
+    -- Create a unique set of ingredients from all sources
+    local uniqueIngredients = {}
+    local count = 0
+    
+    -- Get ingredients from Config.Items (restaurant items)
+    if Config.Items then
+        for restaurant, categories in pairs(Config.Items) do
+            for category, items in pairs(categories) do
+                for itemName, itemData in pairs(items) do
+                    if not uniqueIngredients[itemName] then
+                        uniqueIngredients[itemName] = {
+                            value = itemName,
+                            label = itemData.label or itemName
+                        }
+                        count = count + 1
+                    end
+                end
+            end
         end
+    end
+    
+    -- Also get ingredients from Config.ItemsFarming
+    if Config.ItemsFarming then
+        for category, items in pairs(Config.ItemsFarming) do
+            for itemName, itemData in pairs(items) do
+                if not uniqueIngredients[itemName] then
+                    uniqueIngredients[itemName] = {
+                        value = itemName,
+                        label = itemData.label or itemName
+                    }
+                    count = count + 1
+                end
+            end
+        end
+    end
+    
+    -- Convert to array for dropdown
+    for _, ingredient in pairs(uniqueIngredients) do
+        table.insert(ingredientLabels, ingredient)
     end
     
     -- Sort alphabetically by label
     table.sort(ingredientLabels, function(a, b)
         return a.label < b.label
     end)
+    
+    print(string.format("[ADMIN] Loaded %d ingredients for dropdowns", count))
     
     return ingredientLabels
 end
@@ -301,9 +334,22 @@ AddEventHandler('admin:openOperationsMenu', function()
             description = "Manually adjust warehouse stock",
             icon = "fas fa-boxes",
             onSelect = function()
+                -- Get warehouse options
+                local warehouses = {
+                    { value = "main", label = "Main Warehouse" },
+                    { value = "import", label = "Import Distribution Center" }
+                }
+                
                 local ingredients = getIngredientOptions()
                 
                 local input = lib.inputDialog("Stock Adjustment", {
+                    {
+                        type = "select",
+                        label = "Select Warehouse",
+                        options = warehouses,
+                        default = "main",
+                        required = true
+                    },
                     { 
                         type = "select", 
                         label = "Select Ingredient", 
@@ -320,8 +366,8 @@ AddEventHandler('admin:openOperationsMenu', function()
                         required = true 
                     }
                 })
-                if input and input[1] and input[2] then
-                    TriggerServerEvent('admin:adjustStock', input[1], tonumber(input[2]))
+                if input and input[1] and input[2] and input[3] then
+                    TriggerServerEvent('admin:adjustStock', input[1], input[2], tonumber(input[3]))
                 end
             end
         },
@@ -330,16 +376,21 @@ AddEventHandler('admin:openOperationsMenu', function()
             description = "Create priority deliveries",
             icon = "fas fa-exclamation-triangle",
             onSelect = function()
-                -- Simplified emergency order creation
+                -- Build restaurant list with proper names
                 local restaurants = {}
                 if Config.Restaurants then
                     for id, data in pairs(Config.Restaurants) do
                         table.insert(restaurants, {
                             value = tostring(id),
-                            label = data.label or ("Restaurant " .. id)
+                            label = data.name or ("Restaurant " .. id)
                         })
                     end
                 end
+                
+                -- Sort by ID for consistent ordering
+                table.sort(restaurants, function(a, b)
+                    return tonumber(a.value) < tonumber(b.value)
+                end)
                 
                 local ingredients = getIngredientOptions()
                 

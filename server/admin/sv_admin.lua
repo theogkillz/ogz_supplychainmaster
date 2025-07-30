@@ -17,6 +17,41 @@ local AdminList = {
 local debugMode = false
 
 -- ===============================================
+-- HELPER FUNCTIONS
+-- ===============================================
+
+-- Get restaurant name helper
+local function getRestaurantName(restaurantId)
+    if Config.Restaurants and Config.Restaurants[restaurantId] then
+        return Config.Restaurants[restaurantId].name or ("Restaurant " .. restaurantId)
+    end
+    return "Restaurant " .. restaurantId
+end
+    -- Check Config.Items first
+    if Config.Items then
+        for restaurant, categories in pairs(Config.Items) do
+            for category, items in pairs(categories) do
+                if items[itemName] then
+                    return items[itemName].label or itemName
+                end
+            end
+        end
+    end
+    
+    -- Check Config.ItemsFarming
+    if Config.ItemsFarming then
+        for category, items in pairs(Config.ItemsFarming) do
+            if items[itemName] then
+                return items[itemName].label or itemName
+            end
+        end
+    end
+    
+    -- Return original name if not found
+--     return itemName
+-- end
+
+-- ===============================================
 -- PERMISSION SYSTEM (SIMPLIFIED)
 -- ===============================================
 
@@ -186,9 +221,34 @@ end)
 -- OPERATIONS HANDLERS
 -- ===============================================
 
--- Stock adjustment (fixed to check proper permission)
+function GetItemLabel(itemName)
+    -- Check Config.Items first
+    if Config.Items then
+        for restaurant, categories in pairs(Config.Items) do
+            for category, items in pairs(categories) do
+                if items[itemName] then
+                    return items[itemName].label or itemName
+                end
+            end
+        end
+    end
+    
+    -- Check Config.ItemsFarming
+    if Config.ItemsFarming then
+        for category, items in pairs(Config.ItemsFarming) do
+            if items[itemName] then
+                return items[itemName].label or itemName
+            end
+        end
+    end
+    
+    -- Return original name if not found
+    return itemName
+end
+
+-- Stock adjustment
 RegisterNetEvent('admin:adjustStock')
-AddEventHandler('admin:adjustStock', function(ingredient, newQuantity)
+AddEventHandler('admin:adjustStock', function(warehouse, ingredient, newQuantity)
     local src = source
     
     if not hasAdminPermission(src, 'moderator') then 
@@ -201,27 +261,36 @@ AddEventHandler('admin:adjustStock', function(ingredient, newQuantity)
         return 
     end
     
-    MySQL.Async.execute([[
-        INSERT INTO supply_warehouse_stock (ingredient, quantity) 
+    -- Determine which table to update based on warehouse selection
+    local tableName = warehouse == "import" and "supply_import_stock" or "supply_warehouse_stock"
+    local warehouseName = warehouse == "import" and "Import Distribution Center" or "Main Warehouse"
+    
+    MySQL.Async.execute(string.format([[
+        INSERT INTO %s (ingredient, quantity) 
         VALUES (?, ?) 
         ON DUPLICATE KEY UPDATE quantity = ?
-    ]], {ingredient, newQuantity, newQuantity}, function(success)
+    ]], tableName), {ingredient, newQuantity, newQuantity}, function(success)
         if success then
-            -- Get item label from config
-            local itemLabel = ingredient
-            if Config.Ingredients and Config.Ingredients[ingredient] then
-                itemLabel = Config.Ingredients[ingredient].label or ingredient
-            end
+            -- Get item label using the global function
+            local itemLabel = GetItemLabel(ingredient)
             
             TriggerClientEvent('ox_lib:notify', src, {
                 title = '✅ Stock Adjusted',
-                description = string.format('%s set to %d units', itemLabel, newQuantity),
+                description = string.format('%s set to %d units in %s', itemLabel, newQuantity, warehouseName),
                 type = 'success',
                 duration = 8000
             })
             
             -- Log the action
-            print(string.format("[ADMIN] %s adjusted %s stock to %d", GetPlayerName(src), ingredient, newQuantity))
+            print(string.format("[ADMIN] %s adjusted %s stock to %d in %s", 
+                GetPlayerName(src), ingredient, newQuantity, warehouseName))
+        else
+            TriggerClientEvent('ox_lib:notify', src, {
+                title = '❌ Error',
+                description = 'Failed to update stock',
+                type = 'error',
+                duration = 5000
+            })
         end
     end)
 end)
@@ -321,7 +390,7 @@ AddEventHandler('admin:getMarketTrends', function()
         LEFT JOIN supply_warehouse_stock ws ON ws.ingredient = mp.ingredient
     ]], {}, function(results)
         for _, item in ipairs(results or {}) do
-            local label = Config.Ingredients[item.ingredient] and Config.Ingredients[item.ingredient].label or item.ingredient
+            local label = GetItemLabel(item.ingredient)
             
             marketData[item.ingredient] = {
                 label = label,
@@ -373,7 +442,7 @@ AddEventHandler('admin:getAlertSummary', function()
         
         for _, alert in ipairs(results) do
             local emoji = alert.alert_type == 'critical' and '🚨' or alert.alert_type == 'low' and '⚠️' or 'ℹ️'
-            local label = Config.Ingredients[alert.ingredient] and Config.Ingredients[alert.ingredient].label or alert.ingredient
+            local label = GetItemLabel(alert.ingredient)
             
             message = message .. string.format(
                 "%s **%s** - %s\n",
@@ -886,8 +955,8 @@ end, false)
 AddEventHandler('onResourceStart', function(resourceName)
     if resourceName == GetCurrentResourceName() then
         print('================================================')
-        print('[ADMIN] Supply Chain Admin System v2.0.1 REFINED')
-        print('[ADMIN] Database Fix Applied - No acknowledged column required')
+        print('[ADMIN] Supply Chain Admin System v2.1.0 REFINED')
+        print('[ADMIN] Features: Clean UI, Smart Dropdowns, Role-Based Access')
         print('[ADMIN] Commands: /supply, /supplyjobreset, /supplytest')
         print('[ADMIN] Quick Access: /supplyadmin, /supplyreset')
         print('[ADMIN] Debug Mode: ' .. (debugMode and 'ON' or 'OFF'))
