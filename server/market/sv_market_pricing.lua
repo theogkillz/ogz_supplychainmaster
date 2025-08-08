@@ -11,6 +11,29 @@ local marketData = {
     lastUpdate = 0
 }
 
+-- Connection health check
+local dbHealthy = true
+local lastHealthCheck = 0
+
+local function checkDatabaseHealth()
+    local currentTime = os.time()
+    if currentTime - lastHealthCheck < 30 then
+        return dbHealthy
+    end
+    
+    lastHealthCheck = currentTime
+    local success = pcall(function()
+        return MySQL.scalar.await('SELECT 1')
+    end)
+    
+    dbHealthy = success
+    if not success then
+        print("^1[MARKET] Database connection unhealthy!^0")
+    end
+    
+    return dbHealthy
+end
+
 -- Calculate stock level factor
 local function calculateStockFactor(ingredient, currentStock)
     if not Config.MarketPricing.factors.stockLevel.enabled then
@@ -37,7 +60,7 @@ local function calculateStockFactor(ingredient, currentStock)
     end
 end
 
--- Calculate demand factor
+-- Calculate demand factor (WITH PROPER ERROR HANDLING!)
 local function calculateDemandFactor(ingredient)
     if not Config.MarketPricing.factors.demand.enabled then
         return 1.0
@@ -46,30 +69,37 @@ local function calculateDemandFactor(ingredient)
     local hoursAgo = Config.MarketPricing.factors.demand.analysisWindow
     local startTime = os.date("%Y-%m-%d %H:%M:%S", os.time() - (hoursAgo * 3600))
     
-    MySQL.Async.fetchScalar('SELECT COUNT(*) FROM supply_orders WHERE ingredient = ? AND created_at >= ? AND status != "denied"', 
-        {ingredient, startTime}, function(orderCount)
-        
-        local demandLevel = "normal"
-        if orderCount >= 10 then
-            demandLevel = "high"
-        elseif orderCount <= 2 then
-            demandLevel = "low"
-        end
-        
-        marketData.demandMetrics[ingredient] = {
-            level = demandLevel,
-            orderCount = orderCount,
-            lastUpdated = os.time()
-        }
+    -- Use await pattern with error handling
+    local success, orderCount = pcall(function()
+        return MySQL.scalar.await('SELECT COUNT(*) FROM supply_orders WHERE ingredient = ? AND created_at >= ? AND status != ?', 
+            {ingredient, startTime, 'denied'})
     end)
     
-    local demand = marketData.demandMetrics[ingredient]
-    if not demand then return 1.0 end
+    if not success then
+        print(string.format("^3[MARKET] Database connection error for %s, using default demand factor^0", ingredient))
+        -- Return default multiplier on error
+        return 1.0
+    end
+    
+    orderCount = orderCount or 0
+    
+    local demandLevel = "normal"
+    if orderCount >= 10 then
+        demandLevel = "high"
+    elseif orderCount <= 2 then
+        demandLevel = "low"
+    end
+    
+    marketData.demandMetrics[ingredient] = {
+        level = demandLevel,
+        orderCount = orderCount,
+        lastUpdated = os.time()
+    }
     
     local factor = Config.MarketPricing.factors.demand
-    if demand.level == "high" then
+    if demandLevel == "high" then
         return factor.highDemandMultiplier
-    elseif demand.level == "low" then
+    elseif demandLevel == "low" then
         return factor.lowDemandMultiplier
     else
         return factor.normalDemandMultiplier
@@ -498,12 +528,27 @@ AddEventHandler('market:initialize', function()
     
     -- Start demand analysis cycle
     Citizen.CreateThread(function()
-        while true do
-            Citizen.Wait(Config.MarketPricing.intervals.demandAnalysis * 1000)
-            -- Update demand metrics for all ingredients
-            for ingredient, _ in pairs(marketData.currentPrices) do
-                calculateDemandFactor(ingredient)
-                Citizen.Wait(100)
+    while true do
+        Citizen.Wait(Config.MarketPricing.intervals.demandAnalysis * 1000)
+        
+        -- Check database health first
+        if not checkDatabaseHealth() then
+            print("^3[MARKET] Skipping demand analysis - database unhealthy^0")
+            Citizen.Wait(30000) -- Wait 30 seconds before retry
+        end
+        
+        -- Update demand metrics for all ingredients WITH DELAYS
+        local ingredients = {}
+        for ingredient, _ in pairs(marketData.currentPrices) do
+            table.insert(ingredients, ingredient)
+        end
+        
+        -- Process in batches to avoid connection flooding
+        for i = 1, #ingredients, 5 do -- Process 5 at a time
+            for j = i, math.min(i + 4, #ingredients) do
+                calculateDemandFactor(ingredients[j])
+            end
+            Citizen.Wait(500)
             end
         end
     end)
