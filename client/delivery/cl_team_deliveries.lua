@@ -42,42 +42,6 @@ local function calculateDeliveryBoxes(orders)
     return boxesNeeded, containersNeeded, totalItems, itemsList
 end
 
--- Helper function to get available convoy spawn point
-local function GetConvoySpawnPoint(warehouseId)
-    local warehouseConfig = Config.Warehouses[warehouseId or 1]
-    if not warehouseConfig or not warehouseConfig.convoySpawnPoints then
-        print("[CONVOY] Warning: No convoy spawn points configured for warehouse", warehouseId)
-        -- Fallback to default spawn with offset
-        return warehouseConfig.vehicle.position
-    end
-    
-    -- Find first available spawn point
-    for _, spawnPoint in ipairs(warehouseConfig.convoySpawnPoints) do
-        if not spawnPoint.occupied then
-            -- Mark as occupied
-            spawnPoint.occupied = true
-            
-            -- Set timeout to release after 5 minutes
-            SetTimeout(300000, function()
-                spawnPoint.occupied = false
-            end)
-            
-            return spawnPoint.position
-        end
-    end
-    
-    -- All spawn points occupied, use random offset from base position
-    print("[CONVOY] Warning: All convoy spawn points occupied, using random offset")
-    local basePos = warehouseConfig.vehicle.position
-    local randomOffset = math.random(-15, 15)
-    return vector4(
-        basePos.x + randomOffset,
-        basePos.y + randomOffset,
-        basePos.z,
-        basePos.w
-    )
-end
-
 -- Enhanced warehouse order details to include team option
 RegisterNetEvent("warehouse:showOrderDetails")
 AddEventHandler("warehouse:showOrderDetails", function(orders)
@@ -1006,33 +970,6 @@ AddEventHandler("team:spawnDeliveryVehicle", function(teamData)
     RequestModel(vehicleModel)
     while not HasModelLoaded(vehicleModel) do
         Citizen.Wait(100)
-    end
-
-    -- Get convoy-safe spawn position
-    local spawnPos = GetConvoySpawnPoint(1) -- Use warehouse 1
-    
-    -- Verify spawn area is clear (quick check)
-    local spawnClear = true
-    local nearbyVehicles = GetGamePool('CVehicle')
-    for _, vehicle in ipairs(nearbyVehicles) do
-        local vehPos = GetEntityCoords(vehicle)
-        if #(vehPos - vector3(spawnPos.x, spawnPos.y, spawnPos.z)) < 3.0 then
-            spawnClear = false
-            break
-        end
-    end
-    
-    if not spawnClear then
-        lib.notify({
-            title = "Spawn Blocked",
-            description = "Vehicle spawn area is blocked. Trying alternate position...",
-            type = "warning",
-            duration = 3000,
-            position = Config.UI.notificationPosition,
-            markdown = Config.UI.enableMarkdown
-        })
-        -- Get next available spawn point
-        spawnPos = GetConvoySpawnPoint(1)
     end
 
     -- Spawn vehicle at convoy position

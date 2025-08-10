@@ -49,25 +49,28 @@ Config.Warehouses = {
             vector3(-84.76, 6542.53, 31.49)
         },
         heading = 224.0426,
-        -- SESSION 36 FIX: Added convoy spawn points to prevent vehicle collisions
-        convoySpawnPoints = {
-            -- Primary spawn (leader)
+
+        -- SMART SPAWN POINTS (repurpose convoy points)
+        -- We'll only use the first 3-4 for hybrid system
+        smartSpawnPoints = {
+            -- Primary spawn (vehicle 1)
             {position = vector4(-85.97, 6559.03, 31.23, 223.13), occupied = false, priority = 1},
-            -- Line formation along the road (4-5 unit spacing)
+            -- Secondary spawn (vehicle 2)
+            {position = vector4(-83.26, 6561.48, 31.23, 222.38), occupied = false, priority = 2},
+            -- Tertiary spawn (vehicle 3)
+            {position = vector4(-80.68, 6563.84, 31.23, 221.13), occupied = false, priority = 3},
+            -- Overflow (backup)
+            {position = vector4(-78.01, 6566.43, 31.23, 222.36), occupied = false, priority = 4}
+        },
+
+        -- Convoy spawn points to prevent vehicle collisions
+        convoySpawnPoints = {
+            {position = vector4(-85.97, 6559.03, 31.23, 223.13), occupied = false, priority = 1},
             {position = vector4(-83.26, 6561.48, 31.23, 222.38), occupied = false, priority = 2},
             {position = vector4(-80.68, 6563.84, 31.23, 221.13), occupied = false, priority = 3},
             {position = vector4(-78.01, 6566.43, 31.23, 222.36), occupied = false, priority = 4},
             {position = vector4(-75.25, 6568.71, 31.23, 221.13), occupied = false, priority = 5},
-            -- Second row (parallel parking style)
             {position = vector4(-63.51, 6564.24, 31.49, 135.6), occupied = false, priority = 6},
-            {position = vector4(-61.24, 6561.92, 31.49, 139.01), occupied = false, priority = 7},
-            {position = vector4(-58.96, 6559.27, 31.49, 133.57), occupied = false, priority = 8},
-            -- Side positions
-            {position = vector4(-56.86, 6556.58, 31.49, 134.83), occupied = false, priority = 9},
-            {position = vector4(-54.27, 6554.25, 31.49, 135.13), occupied = false, priority = 10},
-            -- Overflow positions
-            {position = vector4(-51.35, 6551.88, 31.49, 138.82), occupied = false, priority = 11},
-            {position = vector4(-48.89, 6549.02, 31.49, 131.7), occupied = false, priority = 12}
         }
     },
     [2] = {
@@ -83,25 +86,25 @@ Config.Warehouses = {
             vector3(1178.29, -3319.26, 6.03)
         },
         heading = 94.91,
-        -- SESSION 36 FIX: Added convoy spawn points to prevent vehicle collisions
-        convoySpawnPoints = {
-            -- Primary spawn (leader)
+
+        smartSpawnPoints = {
+            -- Primary spawn (vehicle 1)
             {position = vector4(1150.8, -3297.1, 5.9, 94.21), occupied = false, priority = 1},
-            -- Line formation along the road (4-5 unit spacing)
+            -- Secondary spawn (vehicle 2)
+            {position = vector4(1150.73, -3292.81, 5.9, 85.63), occupied = false, priority = 2},
+            -- Tertiary spawn (vehicle 3)
+            {position = vector4(1150.56, -3286.68, 5.9, 85.94), occupied = false, priority = 3},
+            -- Overflow (backup)
+            {position = vector4(1150.47, -3281.33, 5.9, 87.11), occupied = false, priority = 4}
+        },
+
+        convoySpawnPoints = {
+            {position = vector4(1150.8, -3297.1, 5.9, 94.21), occupied = false, priority = 1},
             {position = vector4(1150.73, -3292.81, 5.9, 85.63), occupied = false, priority = 2},
             {position = vector4(1150.56, -3286.68, 5.9, 85.94), occupied = false, priority = 3},
             {position = vector4(1150.47, -3281.33, 5.9, 87.11), occupied = false, priority = 4},
             {position = vector4(1151.0, -3276.31, 5.9, 94.53), occupied = false, priority = 5},
-            -- Second row (parallel parking style)
             {position = vector4(1151.0, -3270.36, 5.9, 77.18), occupied = false, priority = 6},
-            {position = vector4(1150.96, -3264.07, 5.9, 84.26), occupied = false, priority = 7},
-            {position = vector4(1151.17, -3257.95, 5.9, 88.21), occupied = false, priority = 8},
-            -- Side positions
-            {position = vector4(1151.01, -3252.04, 5.9, 92.4), occupied = false, priority = 9},
-            {position = vector4(1143.97, -3245.22, 5.9, 180.0), occupied = false, priority = 10},
-            -- Overflow positions
-            {position = vector4(1140.15, -3244.79, 5.9, 181.56), occupied = false, priority = 11},
-            {position = vector4(1135.89, -3244.89, 5.9, 175.5), occupied = false, priority = 12}
         }
     }
 }

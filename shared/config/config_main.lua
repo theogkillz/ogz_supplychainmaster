@@ -523,6 +523,75 @@ Config.TeamDeliveries = {
     }
 }
 
+-- ===================================
+-- HYBRID VEHICLE SPAWNING SYSTEM
+-- ===================================
+Config.HybridSpawnSystem = {
+    enabled = true,  -- Use smart hybrid spawning instead of convoy
+    
+    -- Vehicle distribution rules
+    distribution = {
+        duo = {
+            teamSize = 2,
+            vehicles = 1,
+            arrangement = "shared",
+            description = "One vehicle, both players ride together"
+        },
+        squad = {
+            minTeamSize = 3,
+            maxTeamSize = 4,
+            maxVehicles = 2,
+            arrangement = "paired",
+            description = "Two vehicles maximum, split team"
+        },
+        large = {
+            minTeamSize = 5,
+            maxTeamSize = 8,
+            maxVehicles = 3,
+            arrangement = "distributed",
+            description = "Three vehicles maximum, distributed load"
+        }
+    },
+    
+    -- Spawn configuration
+    spawning = {
+        useConvoyPoints = true,  -- Reuse existing convoy points smartly
+        maxActiveSpawns = 3,     -- Never more than 3 vehicles per team
+        spawnDelay = 2000,       -- 2 second delay between spawns
+        clearAfter = 30000,      -- Clear spawn marker after 30 seconds
+        
+        -- Simple offset pattern if convoy points not available
+        fallbackOffsets = {
+            {x = 0, y = 0},      -- First vehicle at base
+            {x = 5, y = 0},      -- Second vehicle to the right
+            {x = -5, y = 0},     -- Third vehicle to the left
+        }
+    },
+    
+    -- Vehicle selection by load
+    vehicleSelection = {
+        {maxBoxes = 10, model = "speedo"},
+        {maxBoxes = 20, model = "mule"},
+        {maxBoxes = 25, model = "mule3"},
+        {maxBoxes = 999, model = "pounder"}
+    },
+    
+    -- Visual distinction
+    teamColors = {
+        leader = {r = 0, g = 255, b = 0},      -- Green for leader
+        member = {r = 0, g = 150, b = 255},     -- Blue for members
+        shared = {r = 255, g = 165, b = 0}      -- Orange for shared vehicles
+    },
+    
+    -- Key sharing for shared vehicles
+    keySharing = {
+        enabled = true,
+        duoAutoShare = true,     -- Automatically share keys in duo mode
+        squadAutoShare = true,  -- Manual key sharing for squads
+        platePrefix = "TEAM"     -- Predictable plates for key sharing
+    }
+}
+
 Config.ImportSystem = {
     enabled = true,
     

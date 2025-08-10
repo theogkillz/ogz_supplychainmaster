@@ -5,13 +5,10 @@ local QBCore = exports['qb-core']:GetCoreObject()
 local activeTeamDeliveries = {}
 local teamInvites = {}
 local persistentTeams = {}
-local vehicleSpawnQueue = {}
-local isSpawning = false
 
 -- Forward declarations
 local startTeamDelivery
 local completeTeamDelivery
-local processVehicleSpawnQueue
 
 -- Utility Functions
 local function hasWarehouseAccess(source)
@@ -365,85 +362,7 @@ end
 
 -- Sequential vehicle spawning to prevent collisions
 function spawnTeamVehicles(teamId)
-    local team = activeTeamDeliveries[teamId]
-    if not team then return end
-    
-    vehicleSpawnQueue[teamId] = {}
-    
-    -- For duos, only leader gets vehicle
-    if team.isDuo then
-        for citizenid, member in pairs(team.members) do
-            if citizenid == team.leaderId then
-                table.insert(vehicleSpawnQueue[teamId], {
-                    member = member,
-                    isLeader = true,
-                    isDuoDriver = true,
-                    boxes = team.totalBoxes -- All boxes in one vehicle
-                })
-            else
-                -- Passenger notification
-                TriggerClientEvent('ox_lib:notify', member.source, {
-                    title = '🚐 Duo Delivery',
-                    description = 'You\'ll ride with the team leader. Wait for vehicle spawn.',
-                    type = 'info',
-                    duration = 8000,
-                    position = Config.UI.notificationPosition,
-                    markdown = Config.UI.enableMarkdown
-                })
-            end
-        end
-    else
-        -- Regular team spawning (one vehicle per member)
-        for citizenid, member in pairs(team.members) do
-            table.insert(vehicleSpawnQueue[teamId], {
-                member = member,
-                isLeader = (citizenid == team.leaderId),
-                boxes = member.boxesAssigned
-            })
-        end
-    end
-    
-    -- Start spawn sequence
-    processVehicleSpawnQueue(teamId)
-end
-
--- Process spawn queue one at a time
-processVehicleSpawnQueue = function(teamId)
-    if not vehicleSpawnQueue[teamId] or #vehicleSpawnQueue[teamId] == 0 then
-        vehicleSpawnQueue[teamId] = nil
-        return
-    end
-    
-    local nextSpawn = table.remove(vehicleSpawnQueue[teamId], 1)
-    local teamData = activeTeamDeliveries[teamId]
-    
-    -- Create spawn data
-    local spawnData = {
-        teamId = teamId,
-        memberRole = nextSpawn.isLeader and "leader" or "member",
-        boxesAssigned = nextSpawn.boxes,
-        restaurantId = teamData.restaurantId,
-        deliveryType = teamData.deliveryType,
-        isDuo = teamData.isDuo,
-        isDuoDriver = nextSpawn.isDuoDriver
-    }
-    
-    -- Trigger client spawn (will use achievement system)
-    TriggerClientEvent("team:spawnDeliveryVehicle", nextSpawn.member.source, spawnData)
-    
-    -- Show queue status to waiting members
-    if #vehicleSpawnQueue[teamId] > 0 then
-        for i, waiting in ipairs(vehicleSpawnQueue[teamId]) do
-            TriggerClientEvent('ox_lib:notify', waiting.member.source, {
-                title = '⏳ Vehicle Queue',
-                description = string.format('Position in queue: %d\nPlease wait for your turn...', i),
-                type = 'info',
-                duration = 5000,
-                position = Config.UI.notificationPosition,
-                markdown = Config.UI.enableMarkdown
-            })
-        end
-    end
+    TriggerEvent('team:startVehicleSpawning', teamId)
 end
 
 RegisterNetEvent('supply:teams:acceptOrder')
@@ -562,11 +481,7 @@ end)
 -- Client confirms vehicle is clear of spawn
 RegisterNetEvent('team:vehicleSpawnComplete')
 AddEventHandler('team:vehicleSpawnComplete', function(teamId)
-    -- Process next in queue
-    if vehicleSpawnQueue[teamId] then
-        Citizen.Wait(2000) -- 2 second buffer
-        processVehicleSpawnQueue(teamId)
-    end
+    print("[TEAM] Vehicle spawn confirmed for team:", teamId)
 end)
 
 -- Track vehicle damage for coordination bonus
