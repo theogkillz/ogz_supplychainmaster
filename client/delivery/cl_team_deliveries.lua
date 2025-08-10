@@ -278,7 +278,7 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
         }
     }
     
-    -- ACCEPT ORDER BUTTON - Only show when conditions are met
+    -- FIXED: Accept Order Button with proper alertDialog syntax
     if allMembersReady and isLeader then
         table.insert(options, 4, {
             title = '🚚 Accept Team Order',
@@ -286,8 +286,8 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
             icon = 'fas fa-truck-fast',
             iconColor = '#4CAF50',
             onSelect = function()
-                -- Confirmation dialog
-                lib.alertDialog({
+                -- FIXED: Use proper ox_lib alertDialog syntax (no callback)
+                local alert = lib.alertDialog({
                     header = "Start Team Delivery?",
                     content = "This will start the delivery for all team members. Make sure everyone is ready!",
                     centered = true,
@@ -296,24 +296,25 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
                         cancel = "Wait",
                         confirm = "Start Delivery"
                     }
-                }, function(response)
-                    if response == "confirm" then
-                        -- Close the menu
-                        lib.hideContext()
-                        
-                        -- Visual feedback
-                        lib.notify({
-                            title = '📦 Starting Team Delivery',
-                            description = 'Accepting order for your team...',
-                            type = 'info',
-                            duration = 5000,
-                            position = Config.UI.notificationPosition
-                        })
-                        
-                        -- Trigger server event
-                        TriggerServerEvent('supply:teams:acceptOrder', teamId)
-                    end
-                end)
+                })
+                
+                -- Check response directly
+                if alert == "confirm" then
+                    -- Close the menu
+                    lib.hideContext()
+                    
+                    -- Visual feedback
+                    lib.notify({
+                        title = '📦 Starting Team Delivery',
+                        description = 'Accepting order for your team...',
+                        type = 'info',
+                        duration = 5000,
+                        position = Config.UI.notificationPosition
+                    })
+                    
+                    -- Trigger server event
+                    TriggerServerEvent('supply:teams:acceptOrder', teamId)
+                end
             end
         })
     elseif isLeader and not allMembersReady then
@@ -381,14 +382,15 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
         end
     })
     
-    -- Leave team option
+    -- FIXED: Leave team option with proper alertDialog
     table.insert(options, {
         title = "🚪 Leave Team",
         description = "Exit and find another team",
         icon = "fas fa-door-open",
         iconColor = "#F44336",
         onSelect = function()
-            lib.alertDialog({
+            -- FIXED: Use proper ox_lib alertDialog syntax
+            local alert = lib.alertDialog({
                 header = "Leave Team?",
                 content = "Are you sure you want to leave this team? You'll need to join or create a new one.",
                 centered = true,
@@ -397,22 +399,23 @@ AddEventHandler("team:showRecruitmentMenu", function(teamId, teamData)
                     cancel = "Stay",
                     confirm = "Leave Team"
                 }
-            }, function(response)
-                if response == "confirm" then
-                    currentTeam = nil
-                    isReady = false
-                    allMembersReady = false
-                    TriggerServerEvent("team:leaveDelivery", teamId)
-                    
-                    lib.notify({
-                        title = "👥 Left Team",
-                        description = "You have left the delivery team",
-                        type = "info",
-                        duration = 5000,
-                        position = Config.UI.notificationPosition
-                    })
-                end
-            end)
+            })
+            
+            -- Check response directly
+            if alert == "confirm" then
+                currentTeam = nil
+                isReady = false
+                allMembersReady = false
+                TriggerServerEvent("team:leaveDelivery", teamId)
+                
+                lib.notify({
+                    title = "👥 Left Team",
+                    description = "You have left the delivery team",
+                    type = "info",
+                    duration = 5000,
+                    position = Config.UI.notificationPosition
+                })
+            end
         end
     })
     

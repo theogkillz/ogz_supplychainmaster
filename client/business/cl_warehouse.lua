@@ -180,7 +180,7 @@ Citizen.CreateThread(function()
     print("[WAREHOUSE] All warehouse entities created from config")
 end)
 
--- CLEAN Warehouse Menu - Removed non-existent options
+-- CLEAN Warehouse Menu
 RegisterNetEvent("warehouse:openProcessingMenu")
 AddEventHandler("warehouse:openProcessingMenu", function()
     -- Validate job access
@@ -198,10 +198,6 @@ AddEventHandler("warehouse:openProcessingMenu", function()
         })
         return
     end
-
-    -- Pass warehouseId to main menu
-    TriggerEvent("warehouse:openMainMenu", warehouseId)
-end)
     
     -- Determine which warehouse we're at
     local warehouseId = getCurrentWarehouse()
@@ -217,8 +213,15 @@ end)
         return
     end
     
-    RegisterNetEvent("warehouse:openMainMenu")
+    -- Pass warehouseId to main menu
+    TriggerEvent("warehouse:openMainMenu", warehouseId)
+end)
+
+-- Main Menu Handler (COMPLETE AND WORKING)
+RegisterNetEvent("warehouse:openMainMenu")
 AddEventHandler("warehouse:openMainMenu", function(warehouseId)
+    print("[DEBUG] Opening main menu for warehouse:", warehouseId) -- Debug line
+    
     local isImportWarehouse = warehouseId == 2
     local warehouseName = isImportWarehouse and "🌍 Import Distribution Center" or "🏭 Main Warehouse"
     
@@ -263,13 +266,13 @@ AddEventHandler("warehouse:openMainMenu", function(warehouseId)
     
     -- Add team delivery option
     table.insert(options, {
-    title = "👥 Team Deliveries",
-    description = "Join or create delivery teams",
-    icon = "fas fa-users",
-    onSelect = function()
-        TriggerEvent("warehouse:openTeamMenu", warehouseId) -- Fixed event name!
-    end
-})
+        title = "👥 Team Deliveries",
+        description = "Join or create delivery teams",
+        icon = "fas fa-users",
+        onSelect = function()
+            TriggerEvent("warehouse:openTeamMenu", warehouseId)
+        end
+    })
     
     -- Add Import tracking for Import Warehouse only
     if isImportWarehouse then
@@ -303,11 +306,15 @@ AddEventHandler("warehouse:openMainMenu", function(warehouseId)
         end
     })
     
+    print("[DEBUG] Registering context menu with", #options, "options") -- Debug line
+    
     lib.registerContext({
         id = "warehouse_main_menu",
         title = warehouseName,
         options = options
     })
+    
+    print("[DEBUG] Showing context menu...") -- Debug line
     lib.showContext("warehouse_main_menu")
 end)
 

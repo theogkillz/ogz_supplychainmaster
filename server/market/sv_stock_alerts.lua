@@ -51,7 +51,7 @@ local function getAlertLevel(percentage)
     end
 end
 
--- Analyze usage patterns for demand prediction (SIMPLE FIX)
+-- Analyze usage patterns for demand prediction
 local function analyzeUsagePatterns(itemName)
     local analysisWindow = Config.StockAlerts.prediction.analysisWindow
     local startDate = os.date("%Y-%m-%d", os.time() - (analysisWindow * 24 * 3600))
@@ -69,17 +69,10 @@ local function analyzeUsagePatterns(itemName)
         ORDER BY order_date DESC
     ]], {itemName, startDate}, function(results)
         
-        -- SIMPLE ERROR CHECK
-        if results == nil then
-            print(string.format("^3[STOCK ALERTS] Database connection error for %s^0", itemName))
+        if not results or #results < Config.StockAlerts.prediction.minDataPoints then
             return
         end
         
-        if #results < Config.StockAlerts.prediction.minDataPoints then
-            return
-        end
-        
-        -- Rest of your original code stays exactly the same...
         -- Calculate usage statistics
         local totalUsage = 0
         local usageByDay = {}
@@ -92,6 +85,7 @@ local function analyzeUsagePatterns(itemName)
         end
         
         local avgDailyUsage = totalUsage / #results
+        -- local avgOrdersPerDay = (#ordersByDay > 0) and (table.concat(ordersByDay, "+") / #ordersByDay) or 0
         
         -- Calculate variance for confidence
         local variance = 0
