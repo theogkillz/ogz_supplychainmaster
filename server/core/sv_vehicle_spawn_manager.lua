@@ -94,146 +94,240 @@ local function getSafeSpawnPosition(warehouseId, vehicleIndex)
     )
 end
 
+local function assignVehicleIndices(teamId)
+    local team = activeTeamDeliveries[teamId]
+    if not team then return end
+    
+    local memberCount = 0
+    local memberList = {}
+    for citizenid, member in pairs(team.members) do
+        memberCount = memberCount + 1
+        table.insert(memberList, {citizenid = citizenid, member = member})
+    end
+    
+    -- Sort to ensure consistent assignment (leader first)
+    table.sort(memberList, function(a, b)
+        if a.citizenid == team.leaderId then return true end
+        if b.citizenid == team.leaderId then return false end
+        return a.citizenid < b.citizenid
+    end)
+    
+    -- HYBRID DISTRIBUTION LOGIC
+    local vehicleAssignments = {}
+    
+    if memberCount == 2 then
+        -- DUO MODE: Both in vehicle 1
+        vehicleAssignments[1] = {memberList[1], memberList[2]}
+        team.isDuo = true
+        team.vehicleCount = 1
+        
+        print("[HYBRID] DUO MODE - 1 vehicle for 2 players")
+        
+    elseif memberCount <= 4 then
+        -- SQUAD MODE: Split into 2 vehicles
+        local vehiclesNeeded = math.min(2, math.ceil(memberCount / 2))
+        team.vehicleCount = vehiclesNeeded
+        
+        if memberCount == 3 then
+            vehicleAssignments[1] = {memberList[1], memberList[2]}  -- Leader + 1
+            vehicleAssignments[2] = {memberList[3]}                 -- Solo driver
+        else -- memberCount == 4
+            vehicleAssignments[1] = {memberList[1], memberList[2]}  -- Leader + 1
+            vehicleAssignments[2] = {memberList[3], memberList[4]}  -- 2 members
+        end
+        
+        print("[HYBRID] SQUAD MODE - " .. vehiclesNeeded .. " vehicles for " .. memberCount .. " players")
+        
+    else
+        -- LARGE MODE: Maximum 3 vehicles
+        local vehiclesNeeded = math.min(3, math.ceil(memberCount / 3))
+        team.vehicleCount = vehiclesNeeded
+        
+        local playersPerVehicle = math.ceil(memberCount / vehiclesNeeded)
+        local currentVehicle = 1
+        local currentCount = 0
+        
+        vehicleAssignments[currentVehicle] = {}
+        
+        for i, memberData in ipairs(memberList) do
+            table.insert(vehicleAssignments[currentVehicle], memberData)
+            currentCount = currentCount + 1
+            
+            if currentCount >= playersPerVehicle and currentVehicle < vehiclesNeeded then
+                currentVehicle = currentVehicle + 1
+                currentCount = 0
+                vehicleAssignments[currentVehicle] = {}
+            end
+        end
+        
+        print("[HYBRID] LARGE MODE - " .. vehiclesNeeded .. " vehicles for " .. memberCount .. " players")
+    end
+    
+    -- Apply assignments to team members
+    for vehicleIndex, vehicleMembers in pairs(vehicleAssignments) do
+        for _, memberData in ipairs(vehicleMembers) do
+            local member = team.members[memberData.citizenid]
+            if member then
+                member.vehicleIndex = vehicleIndex
+                member.vehicleGroup = vehicleAssignments[vehicleIndex]
+                
+                -- Notify player of their vehicle assignment
+                if member.source then
+                    TriggerClientEvent('ox_lib:notify', member.source, {
+                        title = '🚛 Vehicle Assignment',
+                        description = string.format(
+                            'You are assigned to **Vehicle %d**\n%s',
+                            vehicleIndex,
+                            team.isDuo and "Riding together with your partner!" or 
+                            string.format("Vehicle has %d team member(s)", #vehicleMembers)
+                        ),
+                        type = 'info',
+                        duration = 8000,
+                        position = Config.UI.notificationPosition,
+                        markdown = Config.UI.enableMarkdown
+                    })
+                end
+            end
+        end
+    end
+    
+    return vehicleAssignments
+end
+
 -- MAIN SPAWN HANDLER - SIMPLIFIED
 RegisterNetEvent('team:startVehicleSpawning')
 AddEventHandler('team:startVehicleSpawning', function(teamId)
     local team = activeTeamDeliveries[teamId]
     if not team then return end
     
-    -- Count members
-    local members = {}
-    for citizenid, member in pairs(team.members) do
-        table.insert(members, {
-            citizenid = citizenid,
-            source = member.source,
-            isLeader = (citizenid == team.leaderId),
-            member = member
-        })
-    end
+    -- Assign vehicle indices first
+    local vehicleAssignments = assignVehicleIndices(teamId)
+    if not vehicleAssignments then return end
     
-    -- Sort so leader is first
-    table.sort(members, function(a, b)
-        if a.isLeader then return true end
-        if b.isLeader then return false end
-        return false
-    end)
+    -- Spawn vehicles based on assignments
+    local spawnDelay = 0
+    local warehouseConfig = Config.Warehouses[1]  -- Default warehouse
     
-    local teamSize = #members
-    local distribution = getVehicleDistribution(teamSize, team.totalBoxes)
-    
-    print(string.format("[TEAM SPAWN] Team %s: %d members, %d vehicles needed", 
-        teamId, teamSize, distribution.vehicles))
-    
-    -- Assign vehicles and spawn
-    local vehicleIndex = 1
-    local assignedMembers = 0
-    
-    if distribution.arrangement == "shared" then
-        -- DUO MODE: One vehicle, both players
-        local spawnPos = getSafeSpawnPosition(1, 1)
-        local driverMember = members[1] -- Leader drives
-        local passengerMember = members[2]
-        
-        -- Spawn vehicle for driver
-        local spawnData = {
-            teamId = teamId,
-            memberRole = "leader",
-            boxesAssigned = team.totalBoxes,
-            restaurantId = team.restaurantId,
-            deliveryType = team.deliveryType,
-            isDuo = true,
-            spawnPosition = spawnPos,
-            vehicleIndex = 1,
-            totalVehicles = 1
-        }
-        
-        TriggerClientEvent('team:spawnSmartVehicle', driverMember.source, spawnData)
-        
-        -- Notify passenger
-        TriggerClientEvent('ox_lib:notify', passengerMember.source, {
-            title = '🚐 Duo Delivery',
-            description = string.format('You\'ll ride with %s. Vehicle spawning...', driverMember.member.name),
-            type = 'info',
-            duration = 8000,
-            position = Config.UI.notificationPosition
-        })
-        
-        -- Share keys after spawn
-        SetTimeout(3000, function()
-            local plate = "TEAM" .. string.sub(teamId, -4) -- Generate predictable plate
-            TriggerClientEvent('team:receiveVehicleKeys', passengerMember.source, plate)
+    for vehicleIndex, vehicleMembers in pairs(vehicleAssignments) do
+        Citizen.SetTimeout(spawnDelay, function()
+            -- Calculate boxes for this vehicle
+            local totalBoxesForVehicle = 0
+            for _, memberData in ipairs(vehicleMembers) do
+                local member = team.members[memberData.citizenid]
+                if member then
+                    totalBoxesForVehicle = totalBoxesForVehicle + member.boxesAssigned
+                end
+            end
+            
+            -- Select appropriate vehicle model
+            local vehicleModel = "speedo"  -- Default
+            if totalBoxesForVehicle > 20 then
+                vehicleModel = "pounder"
+            elseif totalBoxesForVehicle > 10 then
+                vehicleModel = "mule"
+            end
+            
+            -- Determine spawn position with smart offsets
+            local baseSpawn = warehouseConfig.vehicle.position
+            local spawnOffset = {x = 0, y = 0}
+            
+            if team.vehicleCount > 1 then
+                -- Use fallback offsets if convoy points not available
+                local offsets = Config.HybridSpawnSystem.spawning.fallbackOffsets
+                if offsets[vehicleIndex] then
+                    spawnOffset = offsets[vehicleIndex]
+                end
+            end
+            
+            local spawnPos = {
+                x = baseSpawn.x + spawnOffset.x,
+                y = baseSpawn.y + spawnOffset.y,
+                z = baseSpawn.z,
+                w = baseSpawn.w
+            }
+            
+            -- Spawn vehicle for each member in this vehicle group
+            for _, memberData in ipairs(vehicleMembers) do
+                local member = team.members[memberData.citizenid]
+                if member and member.source then
+                    -- Prepare team data for client
+                    local teamDataForClient = {
+                        teamId = teamId,
+                        memberRole = (memberData.citizenid == team.leaderId) and "leader" or "member",
+                        boxesAssigned = member.boxesAssigned,
+                        restaurantId = team.restaurantId,
+                        isDuo = team.isDuo,
+                        vehicleIndex = vehicleIndex,
+                        vehicleCount = team.vehicleCount,
+                        members = team.members  -- Include for duo key sharing
+                    }
+                    
+                    -- Only the first member of each vehicle spawns it
+                    if memberData == vehicleMembers[1] then
+                        -- This member spawns the vehicle
+                        teamDataForClient.spawnVehicle = true
+                        teamDataForClient.vehicleModel = vehicleModel
+                        teamDataForClient.spawnPos = spawnPos
+                        
+                        print("[HYBRID] Spawning vehicle " .. vehicleIndex .. " for " .. member.name)
+                    else
+                        -- Other members just get notified
+                        teamDataForClient.spawnVehicle = false
+                        teamDataForClient.waitForVehicle = true
+                        
+                        print("[HYBRID] " .. member.name .. " will share vehicle " .. vehicleIndex)
+                    end
+                    
+                    -- Send spawn instruction to client
+                    TriggerClientEvent('team:spawnDeliveryVehicle', member.source, teamDataForClient)
+                end
+            end
         end)
         
-    else
-        -- SQUAD/LARGE MODE: Multiple vehicles
-        local playersPerVehicle = math.ceil(teamSize / distribution.vehicles)
-        
-        for i = 1, distribution.vehicles do
-            local spawnPos = getSafeSpawnPosition(1, i)
-            local vehicleMembers = {}
-            
-            -- Assign members to this vehicle
-            for j = 1, playersPerVehicle do
-                assignedMembers = assignedMembers + 1
-                if assignedMembers <= teamSize then
-                    table.insert(vehicleMembers, members[assignedMembers])
-                end
-            end
-            
-            -- Spawn vehicle for first member of this group
-            if vehicleMembers[1] then
-                local spawnData = {
-                    teamId = teamId,
-                    memberRole = vehicleMembers[1].isLeader and "leader" or "member",
-                    boxesAssigned = distribution.boxDistribution[i],
-                    restaurantId = team.restaurantId,
-                    deliveryType = team.deliveryType,
-                    isDuo = false,
-                    spawnPosition = spawnPos,
-                    vehicleIndex = i,
-                    totalVehicles = distribution.vehicles,
-                    vehicleMembers = vehicleMembers -- Who's in this vehicle
-                }
-                
-                -- Spawn for primary driver
-                TriggerClientEvent('team:spawnSmartVehicle', vehicleMembers[1].source, spawnData)
-                
-                -- Notify other members in this vehicle group
-                for j = 2, #vehicleMembers do
-                    TriggerClientEvent('ox_lib:notify', vehicleMembers[j].source, {
-                        title = '🚛 Vehicle Group ' .. i,
-                        description = string.format('Your vehicle is spawning (Driver: %s)', vehicleMembers[1].member.name),
-                        type = 'info',
-                        duration = 5000,
-                        position = Config.UI.notificationPosition
-                    })
-                    
-                    -- Share keys
-                    SetTimeout(3000, function()
-                        local plate = "TEAM" .. i .. string.sub(teamId, -3)
-                        TriggerClientEvent('team:receiveVehicleKeys', vehicleMembers[j].source, plate)
-                    end)
-                end
-            end
-            
-            -- Small delay between spawns to prevent collisions
-            Citizen.Wait(2000)
-        end
+        -- Stagger spawns to prevent collisions
+        spawnDelay = spawnDelay + Config.HybridSpawnSystem.spawning.spawnDelay
     end
     
-    -- Summary notification to all team members
-    SetTimeout(5000, function()
-        for _, member in ipairs(members) do
-            TriggerClientEvent('ox_lib:notify', member.source, {
-                title = '✅ Vehicles Ready!',
-                description = string.format('Team: %d vehicles spawned\nArrangement: %s\nLet\'s deliver!', 
-                    distribution.vehicles, distribution.arrangement),
-                type = 'success',
-                duration = 8000,
-                position = Config.UI.notificationPosition
-            })
+    -- Summary notification to all members
+    Citizen.SetTimeout(spawnDelay + 1000, function()
+        for _, member in pairs(team.members) do
+            if member.source then
+                TriggerClientEvent('ox_lib:notify', member.source, {
+                    title = '🚛 Hybrid Fleet Ready!',
+                    description = string.format(
+                        '**Fleet Status:**\n👥 %d drivers\n🚛 %d vehicles\n📦 %d total boxes\n\n%s',
+                        memberCount,
+                        team.vehicleCount,
+                        team.totalBoxes,
+                        team.isDuo and "DUO MODE: Share vehicle and coordinate!" or
+                        team.vehicleCount == 2 and "SQUAD MODE: 2-vehicle operation!" or
+                        "CONVOY MODE: Maximum efficiency!"
+                    ),
+                    type = 'success',
+                    duration = 12000,
+                    position = Config.UI.notificationPosition,
+                    markdown = Config.UI.enableMarkdown
+                })
+            end
         end
     end)
+end)
+
+-- Key sharing handler for duo vehicles
+RegisterNetEvent('team:shareVehicleKeys')
+AddEventHandler('team:shareVehicleKeys', function(teamId, plate)
+    local src = source
+    local team = activeTeamDeliveries[teamId]
+    if not team or not team.isDuo then return end
+    
+    -- Share keys with all team members in duo mode
+    for citizenid, member in pairs(team.members) do
+        if member.source and member.source ~= src then
+            TriggerClientEvent('team:receiveVehicleKeys', member.source, plate)
+            
+            print("[HYBRID] Shared vehicle keys for plate " .. plate .. " with " .. member.name)
+        end
+    end
 end)
 
 -- CLIENT SIDE: cl_team_vehicle_spawn_fixed.lua

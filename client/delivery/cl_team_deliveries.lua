@@ -943,6 +943,29 @@ RegisterNetEvent("team:spawnDeliveryVehicle")
 AddEventHandler("team:spawnDeliveryVehicle", function(teamData)
     teamDeliveryData = teamData
     
+    -- Check if this player should spawn a vehicle or wait
+    if teamData.waitForVehicle then
+        -- This player shares a vehicle, don't spawn
+        lib.notify({
+            title = "🚛 Shared Vehicle",
+            description = "Your teammate is spawning the shared vehicle. Get ready to load boxes!",
+            type = "info",
+            duration = 8000,
+            position = Config.UI.notificationPosition,
+            markdown = Config.UI.enableMarkdown
+        })
+        
+        -- Wait a moment then proceed to loading phase
+        Citizen.SetTimeout(3000, function()
+            local warehouseConfig = Config.Warehouses[1]
+            -- Skip vehicle spawn, go straight to box loading
+            TriggerEvent("team:loadTeamBoxesPallet", warehouseConfig, nil, teamData)
+        end)
+        
+        return
+    end
+    
+    -- This player needs to spawn their vehicle
     local warehouseConfig = Config.Warehouses[1]
     if not warehouseConfig then
         lib.notify({
@@ -956,24 +979,20 @@ AddEventHandler("team:spawnDeliveryVehicle", function(teamData)
         return
     end
 
-    -- NO SCREEN FADE (removed for immersion)
     Citizen.Wait(1000)
 
     local playerPed = PlayerPedId()
-    local vehicleModel = GetHashKey("speedo")
-    
-    -- Leaders get bigger vehicles for convoy deliveries
-    if teamData.memberRole == "leader" and teamData.boxesAssigned > 5 then
-        vehicleModel = GetHashKey("mule")
-    end
+    local vehicleModel = teamData.vehicleModel and GetHashKey(teamData.vehicleModel) or GetHashKey("speedo")
     
     RequestModel(vehicleModel)
     while not HasModelLoaded(vehicleModel) do
         Citizen.Wait(100)
     end
 
-    -- Spawn vehicle at convoy position
-    local van = CreateVehicle(vehicleModel, spawnPos.x, spawnPos.y, spawnPos.z, spawnPos.w, true, false)
+    -- Use spawn position from server (includes offset for multi-vehicle teams)
+    local spawnPos = teamData.spawnPos or warehouseConfig.vehicle.position
+    
+    local van = CreateVehicle(vehicleModel, spawnPos.x, spawnPos.y, spawnPos.z, spawnPos.w or 0, true, false)
     
     SetEntityAsMissionEntity(van, true, true)
     SetVehicleHasBeenOwnedByPlayer(van, true)
@@ -991,28 +1010,97 @@ AddEventHandler("team:spawnDeliveryVehicle", function(teamData)
     local vanPlate = GetVehicleNumberPlateText(van)
     TriggerEvent("vehiclekeys:client:SetOwner", vanPlate)
     
-    -- For duo deliveries, give keys to both players
+    -- For duo deliveries, share keys with partner
     if teamData.isDuo then
         TriggerServerEvent("team:shareVehicleKeys", teamData.teamId, vanPlate)
     end
 
-    -- Visual distinction for team vehicles
-    if teamData.memberRole == "leader" then
-        SetVehicleCustomPrimaryColour(van, 0, 255, 0)    -- Green for leader
+    -- Apply visual distinction based on hybrid mode
+    if teamData.isDuo then
+        -- Orange for shared duo vehicle
+        SetVehicleCustomPrimaryColour(van, 255, 165, 0)
+        SetVehicleCustomSecondaryColour(van, 255, 140, 0)
+    elseif teamData.memberRole == "leader" then
+        -- Green for leader
+        SetVehicleCustomPrimaryColour(van, 0, 255, 0)
+        SetVehicleCustomSecondaryColour(van, 0, 200, 0)
     else
-        SetVehicleCustomPrimaryColour(van, 0, 150, 255)  -- Blue for members
+        -- Blue for members
+        SetVehicleCustomPrimaryColour(van, 0, 150, 255)
+        SetVehicleCustomSecondaryColour(van, 0, 100, 200)
+    end
+    
+    -- Add vehicle marker for team identification
+    if teamData.vehicleIndex then
+        -- Create a small marker above vehicle for testing
+        Citizen.CreateThread(function()
+            local startTime = GetGameTimer()
+            while DoesEntityExist(van) and (GetGameTimer() - startTime) < 30000 do
+                local vehCoords = GetEntityCoords(van)
+                DrawMarker(
+                    2, -- Sphere
+                    vehCoords.x, vehCoords.y, vehCoords.z + 3.0,
+                    0.0, 0.0, 0.0,
+                    0.0, 0.0, 0.0,
+                    0.5, 0.5, 0.5,
+                    teamData.isDuo and 255 or 0,
+                    teamData.isDuo and 165 or (teamData.memberRole == "leader" and 255 or 150),
+                    teamData.isDuo and 0 or (teamData.memberRole == "leader" and 0 or 255),
+                    100,
+                    false, false, 2, false, nil, nil, false
+                )
+                
+                -- Draw vehicle number
+                local camCoords = GetGameplayCamCoords()
+                local distance = #(vehCoords - camCoords)
+                if distance < 50.0 then
+                    SetDrawOrigin(vehCoords.x, vehCoords.y, vehCoords.z + 3.5, 0)
+                    BeginTextCommandDisplayText("STRING")
+                    SetTextScale(0.5, 0.5)
+                    SetTextFont(4)
+                    SetTextColour(255, 255, 255, 255)
+                    SetTextOutline()
+                    SetTextCentre(1)
+                    AddTextComponentString("Vehicle " .. teamData.vehicleIndex)
+                    DrawText(0.0, 0.0)
+                    ClearDrawOrigin()
+                end
+                
+                Citizen.Wait(0)
+            end
+        end)
     end
 
+    -- Mode-specific notification
+    local modeMessage = ""
+    if teamData.isDuo then
+        modeMessage = string.format(
+            "🚐 **DUO MODE**\n1 shared vehicle for 2 players\nLoad %d boxes together!",
+            teamData.boxesAssigned
+        )
+    elseif teamData.vehicleCount == 2 then
+        modeMessage = string.format(
+            "🚚 **SQUAD MODE**\nVehicle %d of 2\nLoad %d boxes for your vehicle!",
+            teamData.vehicleIndex,
+            teamData.boxesAssigned
+        )
+    else
+        modeMessage = string.format(
+            "🚛 **CONVOY MODE**\nVehicle %d of %d\nLoad %d boxes for maximum efficiency!",
+            teamData.vehicleIndex,
+            teamData.vehicleCount,
+            teamData.boxesAssigned
+        )
+    end
+    
     lib.notify({
-        title = "🚛 Team Vehicle Ready",
-        description = string.format("Load %d boxes for your part of the team delivery!", teamData.boxesAssigned),
+        title = "🚛 Vehicle Spawned",
+        description = modeMessage,
         type = "success",
         duration = 10000,
         position = Config.UI.notificationPosition,
         markdown = Config.UI.enableMarkdown
     })
-
-    -- NO TELEPORT (removed for immersion)
     
     -- Use enhanced team pallet loading system
     TriggerEvent("team:loadTeamBoxesPallet", warehouseConfig, van, teamData)
@@ -1051,43 +1139,126 @@ AddEventHandler("team:loadTeamBoxesPallet", function(warehouseConfig, van, teamD
         return
     end
 
-    -- Create SHARED pallet prop (spread out positions to avoid collisions)
-    local palletOffset = (teamData.memberRole == "leader") and 0 or 10  -- Leaders at base, members offset
-    local palletPos = vector3(
-        boxPositions[1].x + palletOffset,
-        boxPositions[1].y + math.random(-3, 3), -- Small random offset
-        boxPositions[1].z
-    )
+    -- HYBRID SMART PALLET POSITIONING
+    local palletPos = nil
+    local memberCount = 0
+    for _ in pairs(teamData.members or {}) do memberCount = memberCount + 1 end
     
+    -- Determine pallet strategy based on HYBRID distribution
+    if teamData.isDuo then
+        -- DUO MODE: Single shared pallet at base position
+        palletPos = vector3(
+            boxPositions[1].x,
+            boxPositions[1].y,
+            boxPositions[1].z
+        )
+        print("[HYBRID] DUO MODE - Single shared pallet spawned")
+        
+    elseif memberCount <= 4 then
+        -- SQUAD MODE: 2 vehicles = 2 pallet zones
+        local vehicleIndex = teamData.vehicleIndex or 1  -- Which vehicle this player is assigned to
+        local xOffset = (vehicleIndex == 1) and -5 or 5  -- Left for vehicle 1, right for vehicle 2
+        
+        palletPos = vector3(
+            boxPositions[1].x + xOffset,
+            boxPositions[1].y,
+            boxPositions[1].z
+        )
+        print("[HYBRID] SQUAD MODE - Pallet " .. vehicleIndex .. " spawned")
+        
+    else
+        -- LARGE MODE: 3 vehicles = distributed pallets
+        local vehicleIndex = teamData.vehicleIndex or 1
+        local offsets = {
+            [1] = {x = -8, y = 0},   -- Left
+            [2] = {x = 0, y = 0},    -- Center
+            [3] = {x = 8, y = 0}     -- Right
+        }
+        local offset = offsets[vehicleIndex] or offsets[1]
+        
+        palletPos = vector3(
+            boxPositions[1].x + offset.x,
+            boxPositions[1].y + offset.y,
+            boxPositions[1].z
+        )
+        print("[HYBRID] LARGE MODE - Pallet " .. vehicleIndex .. " spawned")
+    end
+    
+    -- Create pallet with team-specific visual
     palletEntity = CreateObject(palletModel, palletPos.x, palletPos.y, palletPos.z, true, true, true)
     if DoesEntityExist(palletEntity) then
         PlaceObjectOnGroundProperly(palletEntity)
+        FreezeEntityPosition(palletEntity, true)
         
-        -- Team-colored light effect
+        -- Enhanced visual effect based on team size
         Citizen.CreateThread(function()
             while DoesEntityExist(palletEntity) and boxesLoaded < maxBoxes do
-                local lightColor = teamData.memberRole == "leader" and {r = 0, g = 255, b = 0} or {r = 0, g = 150, b = 255}
+                local lightColor = {r = 0, g = 255, b = 0}  -- Default green
+                
+                if teamData.isDuo then
+                    lightColor = {r = 255, g = 165, b = 0}  -- Orange for duo (shared)
+                elseif teamData.memberRole == "leader" then
+                    lightColor = {r = 0, g = 255, b = 0}    -- Green for leader
+                else
+                    lightColor = {r = 0, g = 150, b = 255}  -- Blue for members
+                end
+                
+                -- Pulsing effect for urgency
+                local pulse = math.sin(GetGameTimer() * 0.003) * 0.5 + 1.5
                 DrawLightWithRange(palletPos.x, palletPos.y, palletPos.z + 1.0, 
-                    lightColor.r, lightColor.g, lightColor.b, 3.0, 1.5)
+                    lightColor.r, lightColor.g, lightColor.b, 3.0, pulse)
+                    
+                -- Draw 3D text showing progress
+                local coords = GetEntityCoords(palletEntity)
+                local camCoords = GetGameplayCamCoords()
+                local distance = #(coords - camCoords)
+                
+                if distance < 15.0 then
+                    SetDrawOrigin(coords.x, coords.y, coords.z + 1.5, 0)
+                    BeginTextCommandDisplayText("STRING")
+                    SetTextScale(0.35, 0.35)
+                    SetTextFont(4)
+                    SetTextColour(255, 255, 255, 215)
+                    SetTextOutline()
+                    SetTextCentre(1)
+                    AddTextComponentString(string.format("📦 %d/%d Boxes", boxesLoaded, maxBoxes))
+                    DrawText(0.0, 0.0)
+                    ClearDrawOrigin()
+                end
+                
                 Citizen.Wait(0)
             end
         end)
     end
 
-    -- Create blip for pallet
+    -- Create blip with team-specific info
     palletBlip = AddBlipForCoord(palletPos.x, palletPos.y, palletPos.z)
     SetBlipSprite(palletBlip, 1)
     SetBlipDisplay(palletBlip, 4)
     SetBlipScale(palletBlip, 0.8)
-    SetBlipColour(palletBlip, teamData.memberRole == "leader" and 2 or 3)
+    SetBlipColour(palletBlip, teamData.isDuo and 47 or (teamData.memberRole == "leader" and 2 or 3))
     SetBlipAsShortRange(palletBlip, true)
     BeginTextCommandSetBlipName("STRING")
-    AddTextComponentString(string.format("Team Pallet (%d boxes)", maxBoxes))
+    
+    local blipText = teamData.isDuo and 
+        string.format("Shared Pallet (%d boxes)", maxBoxes) or
+        string.format("%s Pallet (%d boxes)", 
+            teamData.memberRole == "leader" and "Leader" or "Member", 
+            maxBoxes)
+    AddTextComponentString(blipText)
     EndTextCommandSetBlipName(palletBlip)
 
     -- Helper function to update pallet zone
     local function updatePalletZone()
         exports.ox_target:removeZone(palletZoneName)
+        
+        -- Check if pallet is valid for this player (prevent cross-loading in multi-pallet scenarios)
+        local canUsePallet = true
+        if not teamData.isDuo and memberCount > 4 then
+            -- In large teams, only use your assigned pallet
+            canUsePallet = true  -- This would need vehicle assignment logic
+        end
+        
         exports.ox_target:addBoxZone({
             coords = vector3(palletPos.x, palletPos.y, palletPos.z),
             size = vector3(3.0, 3.0, 2.0),
@@ -1098,7 +1269,7 @@ AddEventHandler("team:loadTeamBoxesPallet", function(warehouseConfig, van, teamD
                 {
                     label = string.format("Grab Box (%d/%d loaded)", boxesLoaded, maxBoxes),
                     icon = "fas fa-box",
-                    disabled = hasBox or boxesLoaded >= maxBoxes,
+                    disabled = hasBox or boxesLoaded >= maxBoxes or not canUsePallet,
                     onSelect = function()
                         if hasBox then
                             lib.notify({
@@ -1112,10 +1283,21 @@ AddEventHandler("team:loadTeamBoxesPallet", function(warehouseConfig, van, teamD
                             return
                         end
                         
-                        if boxesLoaded == 0 and teamData.memberRole == "leader" then
+                        -- Special messaging for different modes
+                        if boxesLoaded == 0 then
+                            local modeMessage = ""
+                            if teamData.isDuo then
+                                modeMessage = "DUO MODE: Share this pallet with your partner!"
+                            elseif memberCount <= 4 then
+                                modeMessage = "SQUAD MODE: Load your assigned boxes!"
+                            else
+                                modeMessage = "CONVOY MODE: Coordinate with your team!"
+                            end
+                            
                             lib.notify({
                                 title = "📦 Team Loading Phase",
-                                description = string.format("Load %d boxes. Your team is counting on you!", maxBoxes),
+                                description = string.format("%s\nLoad %d boxes from this pallet", 
+                                    modeMessage, maxBoxes),
                                 type = "info",
                                 duration = 10000,
                                 position = Config.UI.notificationPosition,
@@ -1126,7 +1308,7 @@ AddEventHandler("team:loadTeamBoxesPallet", function(warehouseConfig, van, teamD
                         if lib.progressBar({
                             duration = 2500,
                             position = "bottom",
-                            label = "Grabbing box from pallet...",
+                            label = string.format("Grabbing box %d/%d...", boxesLoaded + 1, maxBoxes),
                             canCancel = false,
                             disable = { move = true, car = true, combat = true, sprint = true },
                             anim = { dict = "mini@repair", clip = "fixing_a_ped" }
@@ -1138,13 +1320,17 @@ AddEventHandler("team:loadTeamBoxesPallet", function(warehouseConfig, van, teamD
                                 0.1, 0.2, 0.25, -90.0, 0.0, 0.0, true, true, false, true, 1, true)
 
                             hasBox = true
+                            
+                            -- Play carry animation
                             local animDict = "anim@heists@box_carry@"
                             RequestAnimDict(animDict)
                             while not HasAnimDictLoaded(animDict) do
                                 Citizen.Wait(0)
                             end
                             TaskPlayAnim(playerPed, animDict, "idle", 8.0, -8.0, -1, 50, 0, false, false, false)
-
+                            
+                            -- Audio feedback
+                            PlaySoundFrontend(-1, "PICK_UP", "HUD_FRONTEND_DEFAULT_SOUNDSET", false)
                         end
                     end
                 }
@@ -1210,11 +1396,24 @@ AddEventHandler("team:loadTeamBoxesPallet", function(warehouseConfig, van, teamD
                                 -- Update pallet zone
                                 updatePalletZone()
                                 
+                                -- Play load sound
+                                PlaySoundFrontend(-1, "PUT_DOWN", "HUD_FRONTEND_DEFAULT_SOUNDSET", false)
+                                
                                 if boxesLoaded >= maxBoxes then
                                     -- All boxes loaded!
+                                    local completionMessage = ""
+                                    if teamData.isDuo then
+                                        completionMessage = "DUO LOADING COMPLETE! Wait for your partner!"
+                                    elseif memberCount <= 4 then
+                                        completionMessage = "Your vehicle is loaded! Coordinate with squad!"
+                                    else
+                                        completionMessage = "Vehicle loaded! Prepare for convoy departure!"
+                                    end
+                                    
                                     lib.notify({
                                         title = "✅ Loading Complete",
-                                        description = string.format("All %d boxes loaded! Coordinate with your team for delivery!", maxBoxes),
+                                        description = string.format("All %d boxes loaded!\n%s", 
+                                            maxBoxes, completionMessage),
                                         type = "success",
                                         duration = 10000,
                                         position = Config.UI.notificationPosition,
@@ -1223,7 +1422,15 @@ AddEventHandler("team:loadTeamBoxesPallet", function(warehouseConfig, van, teamD
                                     
                                     -- Clean up
                                     if palletBlip then RemoveBlip(palletBlip) end
-                                    if DoesEntityExist(palletEntity) then DeleteObject(palletEntity) end
+                                    if DoesEntityExist(palletEntity) then 
+                                        -- Fade out pallet
+                                        SetEntityAlpha(palletEntity, 150, false)
+                                        Citizen.SetTimeout(1000, function()
+                                            if DoesEntityExist(palletEntity) then
+                                                DeleteObject(palletEntity)
+                                            end
+                                        end)
+                                    end
                                     
                                     for _, zone in ipairs(targetZones) do
                                         exports.ox_target:removeZone(zone)
@@ -1233,9 +1440,12 @@ AddEventHandler("team:loadTeamBoxesPallet", function(warehouseConfig, van, teamD
                                     -- Start team delivery coordination
                                     TriggerEvent("team:startCoordinatedDelivery", teamData.restaurantId, van, teamData)
                                 else
+                                    -- Progress notification
+                                    local remaining = maxBoxes - boxesLoaded
                                     lib.notify({
                                         title = "Box Loaded",
-                                        description = string.format("%d boxes remaining", maxBoxes - boxesLoaded),
+                                        description = string.format("%d box%s remaining", 
+                                            remaining, remaining > 1 and "es" or ""),
                                         type = "success",
                                         duration = 5000,
                                         position = Config.UI.notificationPosition,
@@ -1253,11 +1463,31 @@ AddEventHandler("team:loadTeamBoxesPallet", function(warehouseConfig, van, teamD
 
     Citizen.CreateThread(updateVanTargetZone)
 
+    -- Initial notification with mode-specific info
+    local initialMessage = ""
+    if teamData.isDuo then
+        initialMessage = string.format(
+            "🚐 DUO DELIVERY\nRole: %s\nLoad %d boxes from SHARED pallet\n💡 Coordinate with your partner!",
+            teamData.memberRole == "leader" and "Driver" or "Navigator",
+            maxBoxes
+        )
+    elseif memberCount <= 4 then
+        initialMessage = string.format(
+            "🚚 SQUAD DELIVERY\nRole: %s\nLoad %d boxes from your pallet\n💡 2 vehicles, split loading!",
+            teamData.memberRole == "leader" and "Squad Leader" or "Squad Member",
+            maxBoxes
+        )
+    else
+        initialMessage = string.format(
+            "🚛 CONVOY DELIVERY\nRole: %s\nLoad %d boxes from assigned pallet\n💡 3 vehicles maximum!",
+            teamData.memberRole == "leader" and "Convoy Leader" or "Convoy Driver",
+            maxBoxes
+        )
+    end
+    
     lib.notify({
         title = "🚛 Team Loading Phase",
-        description = string.format("Role: %s | Load %d boxes from shared pallet", 
-            teamData.memberRole == "leader" and "Team Leader" or "Team Member", 
-            maxBoxes),
+        description = initialMessage,
         type = "info",
         duration = 15000,
         position = Config.UI.notificationPosition,

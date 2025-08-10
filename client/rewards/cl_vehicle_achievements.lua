@@ -120,67 +120,79 @@ end
 local function applyAchievementMods(vehicle, achievementTier)
     if not DoesEntityExist(vehicle) then return end
     
+    -- VALIDATE tier is a string
+    if type(achievementTier) ~= "string" then
+        print("[ACHIEVEMENTS] ERROR: Invalid tier type:", type(achievementTier))
+        achievementTier = "rookie"
+    end
+    
     local tierData = Config.AchievementVehicles and Config.AchievementVehicles.performanceTiers and 
                      Config.AchievementVehicles.performanceTiers[achievementTier]
     
     if not tierData then
-        print("[ACHIEVEMENTS] No tier data found for: " .. tostring(achievementTier))
+        print("[ACHIEVEMENTS] No tier data found for tier:", achievementTier)
+        -- Use rookie as fallback
+        tierData = Config.AchievementVehicles and Config.AchievementVehicles.performanceTiers and 
+                   Config.AchievementVehicles.performanceTiers["rookie"]
+    end
+    
+    if not tierData then
+        print("[ACHIEVEMENTS] CRITICAL: No tier data at all!")
         return
     end
     
     -- Apply performance modifications
+    SetVehicleModKit(vehicle, 0)
+    
     if tierData.performanceMods then
         for modType, level in pairs(tierData.performanceMods) do
-            SetVehicleMod(vehicle, modType, level, false)
+            if type(modType) == "number" then
+                SetVehicleMod(vehicle, modType, level, false)
+            end
         end
     end
     
     -- Apply visual modifications
     if tierData.colorTint then
-        local colorTint = tierData.colorTint
-        SetVehicleCustomPrimaryColour(vehicle, colorTint.r, colorTint.g, colorTint.b)
+        SetVehicleCustomPrimaryColour(vehicle, tierData.colorTint.r, tierData.colorTint.g, tierData.colorTint.b)
     end
     
     -- Apply special effects for higher tiers
     if tierData.specialEffects then
         if tierData.specialEffects.underglow then
-            -- Add underglow effect
-            SetVehicleNeonLightEnabled(vehicle, 0, true)
-            SetVehicleNeonLightEnabled(vehicle, 1, true) 
-            SetVehicleNeonLightEnabled(vehicle, 2, true)
-            SetVehicleNeonLightEnabled(vehicle, 3, true)
+            for i = 0, 3 do
+                SetVehicleNeonLightEnabled(vehicle, i, true)
+            end
             
             if tierData.colorTint then
                 SetVehicleNeonLightsColour(vehicle, tierData.colorTint.r, tierData.colorTint.g, tierData.colorTint.b)
             end
         end
-        
-        if tierData.specialEffects.customLivery and Config.AchievementVehicles.visualEffects then
-            local liveryIndex = Config.AchievementVehicles.visualEffects.liveries and 
-                              Config.AchievementVehicles.visualEffects.liveries[achievementTier]
-            if liveryIndex then
-                SetVehicleLivery(vehicle, liveryIndex)
-            end
-        end
     end
     
-    -- Apply engine modifications for performance
-    if tierData.speedMultiplier then
+    -- Apply engine power multiplier
+    if tierData.speedMultiplier and tierData.speedMultiplier > 1.0 then
         SetVehicleEnginePowerMultiplier(vehicle, tierData.speedMultiplier)
     end
     
-    SetVehicleEngineOn(vehicle, true, true, false)
+    -- Fix vehicle condition
+    SetVehicleFixed(vehicle)
+    SetVehicleDirtLevel(vehicle, 0.0)
     
-    -- Show achievement notification
-    lib.notify({
-        title = '🏆 ' .. tierData.name .. ' Vehicle',
-        description = tierData.description,
-        type = 'success',
-        duration = 8000,
-        position = Config.UI and Config.UI.notificationPosition or "top",
-        markdown = Config.UI and Config.UI.enableMarkdown or false
-    })
+    -- Show achievement notification (only if tierData is valid)
+    if tierData.name and tierData.description then
+        lib.notify({
+            title = '🏆 ' .. tierData.name .. ' Vehicle',
+            description = tierData.description,
+            type = 'success',
+            duration = 8000,
+            position = Config.UI and Config.UI.notificationPosition or "top-right"
+        })
+    end
 end
+
+-- Export the fixed function
+exports('applyAchievementMods', applyAchievementMods)
 
 -- ============================================
 -- INTEGRATION WITH EXISTING VEHICLE SPAWNING
@@ -222,7 +234,16 @@ end)
 
 -- Enhanced team delivery vehicle spawning
 RegisterNetEvent("team:spawnAchievementVehicle")
-AddEventHandler("team:spawnAchievementVehicle", function(teamData, achievementTier)
+AddEventHandler("team:spawnAchievementVehicle", function(teamData, vehicleConfig)
+    -- FIX: Extract tier from vehicleConfig, not teamData
+    local achievementTier = vehicleConfig and vehicleConfig.tier or "rookie"
+    
+    -- Validate tier is a string
+    if type(achievementTier) ~= "string" then
+        print("[ACHIEVEMENTS] ERROR: Tier is not a string, got:", type(achievementTier))
+        achievementTier = "rookie"  -- Fallback
+    end
+    
     -- Use existing team spawn logic with achievement mods
     local warehouseConfig = Config.Warehouses and Config.Warehouses[1]
     if not warehouseConfig then
@@ -232,14 +253,19 @@ AddEventHandler("team:spawnAchievementVehicle", function(teamData, achievementTi
     
     local playerPed = PlayerPedId()
     
-    -- Determine vehicle based on team size and achievement tier
-    local vehicleModel = "speedo"
-    if teamData.memberRole == "leader" and teamData.boxesAssigned and teamData.boxesAssigned > 5 then
-        if achievementTier == "elite" or achievementTier == "legendary" then
-            vehicleModel = "mule3"
-        else
-            vehicleModel = "mule"
-        end
+    -- Determine vehicle based on config
+    local vehicleModel = vehicleConfig and vehicleConfig.model or "speedo"
+    
+    -- Skip vehicle spawn for duo passengers
+    if vehicleConfig and vehicleConfig.skipVehicle then
+        lib.notify({
+            title = '👥 Duo Passenger',
+            description = 'Your partner is driving the shared vehicle',
+            type = 'info',
+            duration = 5000,
+            position = Config.UI and Config.UI.notificationPosition or "top-right"
+        })
+        return
     end
     
     -- Ensure vehicleModel is a string
@@ -269,29 +295,48 @@ AddEventHandler("team:spawnAchievementVehicle", function(teamData, achievementTi
     
     if DoesEntityExist(van) then
         -- Standard vehicle setup
-        setupDeliveryVehicle(van, vehicleModel)
+        SetEntityAsMissionEntity(van, true, true)
+        SetVehicleHasBeenOwnedByPlayer(van, true)
+        SetVehicleNeedsToBeHotwired(van, false)
+        SetVehRadioStation(van, "OFF")
+        SetVehicleEngineOn(van, true, true, false)
         
-        -- Apply achievement modifications
+        -- Apply achievement modifications - PASS TIER STRING NOT TABLE
         applyAchievementMods(van, achievementTier)
+        
+        -- Apply team visual modifications
+        if vehicleConfig and vehicleConfig.teamVisuals then
+            local colors = vehicleConfig.teamVisuals.primaryColor
+            if colors then
+                SetVehicleCustomPrimaryColour(van, colors[1], colors[2], colors[3])
+                SetVehicleCustomSecondaryColour(van, colors[1], colors[2], colors[3])
+            end
+        end
         
         -- Achievement tier bonus notification for teams
         if achievementTier ~= "rookie" then
             local tierInfo = Config.AchievementVehicles and Config.AchievementVehicles.performanceTiers and
                            Config.AchievementVehicles.performanceTiers[achievementTier]
-            local tierName = tierInfo and tierInfo.name or achievementTier
             
-            lib.notify({
-                title = '🎉 Team Achievement Bonus!',
-                description = string.format('Team leader has %s tier - enhanced vehicle performance!', tierName),
-                type = 'success',
-                duration = 10000,
-                position = Config.UI and Config.UI.notificationPosition or "top",
-                markdown = Config.UI and Config.UI.enableMarkdown or false
-            })
+            if tierInfo then
+                lib.notify({
+                    title = '🎉 Team Achievement Vehicle!',
+                    description = string.format('%s tier - %s', tierInfo.name, tierInfo.description),
+                    type = 'success',
+                    duration = 8000,
+                    position = Config.UI and Config.UI.notificationPosition or "top-right"
+                })
+            end
         end
         
-        -- Continue with team loading
-        TriggerEvent("team:loadTeamBoxes", warehouseConfig, van, teamData)
+        -- Give keys
+        local plate = GetVehicleNumberPlateText(van)
+        TriggerEvent("vehiclekeys:client:SetOwner", plate)
+        
+        -- Continue with team loading - use proper function
+        if teamData then
+            TriggerEvent("team:loadTeamBoxesPallet", warehouseConfig, van, teamData)
+        end
     end
 end)
 
