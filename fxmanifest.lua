@@ -41,7 +41,6 @@ client_scripts {
     
     -- Delivery Systems
     'client/delivery/cl_team_deliveries.lua',
-    'client/delivery/cl_team_vehicle_handler.lua',
     
     -- UI Systems
     'client/ui/cl_team_ui_features.lua',

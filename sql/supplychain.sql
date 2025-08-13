@@ -163,37 +163,39 @@ CREATE TABLE IF NOT EXISTS `supply_daily_bonuses` (
 CREATE TABLE IF NOT EXISTS `supply_team_deliveries` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
     `team_id` varchar(50) NOT NULL,
-    `order_group_id` varchar(50) NOT NULL,
+    `order_group_id` varchar(100) NOT NULL,
     `restaurant_id` int(11) NOT NULL,
     `leader_citizenid` varchar(50) NOT NULL,
     `member_count` int(11) NOT NULL DEFAULT 2,
     `total_boxes` int(11) NOT NULL,
-    `delivery_type` varchar(50) NOT NULL DEFAULT 'duo',
+    `delivery_type` varchar(50) NOT NULL,
     `coordination_bonus` decimal(10,2) DEFAULT 0.00,
-    `team_multiplier` decimal(3,2) DEFAULT 1.00,
-    `completion_time` int(11) NOT NULL COMMENT 'Time difference in seconds between first and last arrival',
+    `team_multiplier` decimal(10,2) DEFAULT 1.00,
+    `completion_time` int(11) NOT NULL COMMENT 'Time difference in seconds between first and last member',
     `total_payout` decimal(10,2) NOT NULL,
     `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
-    KEY `idx_team_id` (`team_id`),
-    KEY `idx_leader` (`leader_citizenid`),
-    KEY `idx_created` (`created_at`)
+    KEY `team_id` (`team_id`),
+    KEY `leader_citizenid` (`leader_citizenid`),
+    KEY `created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Team members tracking (for detailed stats)
-CREATE TABLE IF NOT EXISTS `supply_team_members` (
+CREATE TABLE IF NOT EXISTS `supply_team_delivery_members` (
     `id` int(11) NOT NULL AUTO_INCREMENT,
-    `team_delivery_id` int(11) NOT NULL,
+    `team_id` varchar(50) NOT NULL,
     `citizenid` varchar(50) NOT NULL,
-    `role` varchar(20) NOT NULL DEFAULT 'member',
-    `boxes_assigned` int(11) NOT NULL,
-    `individual_payout` decimal(10,2) NOT NULL,
-    `completion_order` int(11) NOT NULL COMMENT 'Order of arrival (1 = first, 2 = second, etc)',
-    `vehicle_damaged` tinyint(1) DEFAULT 0,
+    `role` enum('leader','member') NOT NULL DEFAULT 'member',
+    `boxes_assigned` int(11) NOT NULL DEFAULT 0,
+    `boxes_delivered` int(11) NOT NULL DEFAULT 0,
+    `individual_payout` decimal(10,2) NOT NULL DEFAULT 0.00,
+    `vehicle_damaged` tinyint(1) NOT NULL DEFAULT 0,
+    `delivery_time` int(11) NOT NULL DEFAULT 0,
+    `joined_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
-    KEY `idx_citizenid` (`citizenid`),
-    KEY `idx_team_delivery` (`team_delivery_id`),
-    CONSTRAINT `fk_team_delivery` FOREIGN KEY (`team_delivery_id`) REFERENCES `supply_team_deliveries` (`id`) ON DELETE CASCADE
+    KEY `team_id` (`team_id`),
+    KEY `citizenid` (`citizenid`),
+    KEY `team_member` (`team_id`, `citizenid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- All player stats

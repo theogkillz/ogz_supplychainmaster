@@ -17,6 +17,46 @@ Config.Restaurants = {
         delivery = vector3(1596.33, 3767.03, 34.43),
         deliveryBox = vector3(1596.36, 3763.79, 33.43),
     },
+    [3] = {
+        name = "Bean Machine",
+        job = "beanmachine",
+        position = vector3(118.85, -1045.52, 29.31), -- vector4(118.85, -1045.52, 29.31, 182.64)
+        heading = 182.64,
+        delivery = vector3(121.81, -1053.64, 29.19),
+        deliveryBox = vector3(117.43, -1050.41, 29.2),
+    },
+    [4] = {
+        name = "Lucky Plucker - Little Seoul",
+        job = "plucker2",
+        position = vector3(-586.93, -883.4, 25.97), -- vector4(-586.93, -883.4, 25.97, 18.52)
+        heading = 18.52,
+        delivery = vector3(-596.74, -892.7, 25.49),
+        deliveryBox = vector3(1596.36, 3763.79, 33.43),
+    },
+    [5] = {
+        name = "Lucky Plucker - Davis",
+        job = "plucker2",
+        position = vector3(140.46, -1471.46, 29.43), -- vector4(140.46, -1471.46, 29.43, 66.66)
+        heading = 66.66,
+        delivery = vector3(141.68, -1486.69, 29.13),
+        deliveryBox = vector3(-592.58, -892.67, 25.93),
+    },
+    [6] = {
+        name = "Taco Bay",
+        job = "tacoboy",
+        position = vector3(-1260.78, -1207.64, 5.37), -- vector4(-1260.78, -1207.64, 5.37, 153.49)
+        heading = 153.49,
+        delivery = vector3(-1268.65, -1218.77, 4.73),
+        deliveryBox = vector3(-1263.37, -1222.21, 4.9),
+    },
+    [7] = {
+        name = "Taco Bay",
+        job = "tacoboy",
+        position = vector3(-1260.78, -1207.64, 5.37), -- vector4(-1260.78, -1207.64, 5.37, 153.49)
+        heading = 153.49,
+        delivery = vector3(-1268.65, -1218.77, 4.73),
+        deliveryBox = vector3(-1263.37, -1222.21, 4.9),
+    },
     -- New Restaurants
 }
 

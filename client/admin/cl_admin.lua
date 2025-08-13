@@ -7,7 +7,7 @@ local QBCore = exports['qb-core']:GetCoreObject()
 -- Organized by use case, not feature type
 -- ===============================================
 
-local convoyTestVehicles = {}
+local hybridTestVehicles = {} -- Changed from convoyTestVehicles
 local showingMarkers = false
 local isSpawning = false
 
@@ -260,7 +260,7 @@ AddEventHandler('supply:showAdminMenu', function(systemData, adminLevel)
     if adminLevel == "superadmin" then
         table.insert(options, {
             title = "🛠️ Developer Tools",
-            description = "Convoy testing and debug utilities",
+            description = "Hybrid testing and debug utilities", -- UPDATED!
             icon = "fas fa-code",
             iconColor = "#9C27B0",
             onSelect = function()
@@ -710,7 +710,7 @@ AddEventHandler('admin:openSystemMenu', function(adminLevel)
 end)
 
 -- ===============================================
--- DEVELOPER TOOLS (Superadmin Only)
+-- DEVELOPER TOOLS (Superadmin Only) - HYBRID UPDATE!
 -- ===============================================
 RegisterNetEvent('admin:openDevMenu')
 AddEventHandler('admin:openDevMenu', function()
@@ -723,11 +723,11 @@ AddEventHandler('admin:openDevMenu', function()
             end
         },
         {
-            title = "🚛 Convoy Testing",
-            description = "Vehicle spawn position testing",
+            title = "🚛 Hybrid System Testing", -- UPDATED FROM CONVOY!
+            description = "Test 1-3 vehicle spawning (Duo/Squad/Large)",
             icon = "fas fa-truck",
             onSelect = function()
-                TriggerEvent('admin:openConvoyTestMenu')
+                TriggerEvent('admin:openHybridTestMenu') -- UPDATED!
             end
         },
         {
@@ -785,10 +785,10 @@ AddEventHandler('admin:openDevMenu', function()
 end)
 
 -- ===============================================
--- CONVOY TESTING (Keep existing implementation)
+-- HYBRID TESTING SYSTEM (REPLACES CONVOY!)
 -- ===============================================
-RegisterNetEvent('admin:openConvoyTestMenu')
-AddEventHandler('admin:openConvoyTestMenu', function()
+RegisterNetEvent('admin:openHybridTestMenu')
+AddEventHandler('admin:openHybridTestMenu', function()
     local warehouses = {}
     for id, _ in ipairs(Config.Warehouses) do
         table.insert(warehouses, {
@@ -806,11 +806,11 @@ AddEventHandler('admin:openConvoyTestMenu', function()
             end
         },
         {
-            title = "🚛 Quick Spawn Test",
-            description = "Spawn all vehicles at warehouse",
-            icon = "fas fa-truck-loading",
+            title = "🚐 Test Duo Spawn",
+            description = "Spawn 1 vehicle for 2 players",
+            icon = "fas fa-user-friends",
             onSelect = function()
-                local input = lib.inputDialog("Quick Spawn", {
+                local input = lib.inputDialog("Duo Spawn Test", {
                     { 
                         type = "select", 
                         label = "Warehouse", 
@@ -819,13 +819,65 @@ AddEventHandler('admin:openConvoyTestMenu', function()
                     }
                 })
                 if input and input[1] then
-                    TriggerEvent('convoy:spawnAll', tonumber(input[1]))
+                    TriggerEvent('hybrid:spawnVehicles', tonumber(input[1]), 2) -- 2 players = 1 vehicle
                 end
             end
         },
         {
-            title = "📍 Toggle Markers",
-            description = "Show/hide spawn positions",
+            title = "🚚 Test Squad Spawn",
+            description = "Spawn 2 vehicles for 3-4 players",
+            icon = "fas fa-users",
+            onSelect = function()
+                local input = lib.inputDialog("Squad Spawn Test", {
+                    { 
+                        type = "select", 
+                        label = "Warehouse", 
+                        options = warehouses,
+                        required = true 
+                    },
+                    { 
+                        type = "number", 
+                        label = "Team Size (3-4)", 
+                        min = 3,
+                        max = 4,
+                        default = 4,
+                        required = true 
+                    }
+                })
+                if input and input[1] and input[2] then
+                    TriggerEvent('hybrid:spawnVehicles', tonumber(input[1]), tonumber(input[2]))
+                end
+            end
+        },
+        {
+            title = "🚛 Test Large Spawn",
+            description = "Spawn 3 vehicles for 5-8 players",
+            icon = "fas fa-truck-loading",
+            onSelect = function()
+                local input = lib.inputDialog("Large Team Spawn Test", {
+                    { 
+                        type = "select", 
+                        label = "Warehouse", 
+                        options = warehouses,
+                        required = true 
+                    },
+                    { 
+                        type = "number", 
+                        label = "Team Size (5-8)", 
+                        min = 5,
+                        max = 8,
+                        default = 6,
+                        required = true 
+                    }
+                })
+                if input and input[1] and input[2] then
+                    TriggerEvent('hybrid:spawnVehicles', tonumber(input[1]), tonumber(input[2]))
+                end
+            end
+        },
+        {
+            title = "📍 Toggle Spawn Markers",
+            description = "Show/hide hybrid spawn positions (1-3)",
             icon = "fas fa-map-marked",
             onSelect = function()
                 local input = lib.inputDialog("Toggle Markers", {
@@ -837,31 +889,33 @@ AddEventHandler('admin:openConvoyTestMenu', function()
                     }
                 })
                 if input and input[1] then
-                    TriggerEvent('convoy:toggleMarkers', tonumber(input[1]))
+                    TriggerEvent('hybrid:toggleMarkers', tonumber(input[1]))
                 end
             end
         },
         {
-            title = "🧹 Clear Vehicles",
-            description = "Remove test vehicles",
+            title = "🧹 Clear Test Vehicles",
+            description = "Remove all test vehicles",
             icon = "fas fa-broom",
             onSelect = function()
-                TriggerEvent('convoy:clearAll')
+                TriggerEvent('hybrid:clearAll')
             end
         }
     }
     
     lib.registerContext({
-        id = "admin_convoy_menu",
-        title = "🚛 Convoy Testing",
+        id = "admin_hybrid_menu",
+        title = "🚛 Hybrid System Testing",
         options = options
     })
-    lib.showContext("admin_convoy_menu")
+    lib.showContext("admin_hybrid_menu")
 end)
 
--- Keep all convoy event handlers as they are (they work!)
-RegisterNetEvent('convoy:spawnAll')
-AddEventHandler('convoy:spawnAll', function(warehouseId)
+-- ===============================================
+-- HYBRID SPAWN HANDLERS (REPLACES CONVOY!)
+-- ===============================================
+RegisterNetEvent('hybrid:spawnVehicles')
+AddEventHandler('hybrid:spawnVehicles', function(warehouseId, teamSize)
     if isSpawning then
         lib.notify({
             title = 'Already Spawning',
@@ -874,7 +928,7 @@ AddEventHandler('convoy:spawnAll', function(warehouseId)
     
     isSpawning = true
     local warehouse = Config.Warehouses[warehouseId]
-    if not warehouse or not warehouse.convoySpawnPoints then
+    if not warehouse then
         lib.notify({
             title = 'Invalid Warehouse',
             description = 'Warehouse configuration not found',
@@ -885,78 +939,130 @@ AddEventHandler('convoy:spawnAll', function(warehouseId)
         return
     end
     
-    local spawnPoints = warehouse.convoySpawnPoints
-    local vehicleModel = warehouse.vehicle.model
+    -- HYBRID LOGIC: Determine vehicle count based on team size
+    local vehicleCount = 1
+    local teamType = "DUO"
     
-    TriggerEvent('convoy:clearAll')
+    if teamSize <= 2 then
+        vehicleCount = 1
+        teamType = "DUO"
+    elseif teamSize <= 4 then
+        vehicleCount = 2
+        teamType = "SQUAD"
+    else
+        vehicleCount = 3
+        teamType = "LARGE"
+    end
+    
+    -- Clear existing vehicles
+    TriggerEvent('hybrid:clearAll')
     
     lib.notify({
-        title = 'Spawning Convoy',
-        description = string.format('Spawning %d vehicles at Warehouse %d', #spawnPoints, warehouseId),
+        title = '🚛 Spawning Hybrid Fleet',
+        description = string.format(
+            '**%s MODE**\n👥 %d players = 🚛 %d vehicle(s)\nWarehouse: %d',
+            teamType, teamSize, vehicleCount, warehouseId
+        ),
         type = 'info',
-        duration = 5000
+        duration = 8000,
+        markdown = true
     })
     
+    local vehicleModel = warehouse.vehicle.model
     local model = GetHashKey(vehicleModel)
     RequestModel(model)
     while not HasModelLoaded(model) do
         Wait(10)
     end
     
-    for i, point in ipairs(spawnPoints) do
-        if point.position then
-            local vehicle = CreateVehicle(model, 
-                point.position.x, point.position.y, point.position.z, 
-                point.position.w or warehouse.heading, 
-                true, false)
+    -- Use hybrid spawn positions
+    local spawnPositions = {}
+    
+    if Config.HybridSpawnSystem and Config.HybridSpawnSystem.spawning then
+        -- Use smart spawn system
+        if warehouse.convoySpawnPoints then
+            -- Use first 1-3 convoy points for hybrid
+            for i = 1, math.min(vehicleCount, 3) do
+                if warehouse.convoySpawnPoints[i] then
+                    table.insert(spawnPositions, warehouse.convoySpawnPoints[i].position)
+                end
+            end
+        else
+            -- Use fallback offsets
+            local basePos = warehouse.vehicle.position
+            local offsets = Config.HybridSpawnSystem.spawning.fallbackOffsets
             
-            SetEntityAsMissionEntity(vehicle, true, true)
-            SetVehicleOnGroundProperly(vehicle)
-            
-            local colors = {
-                [1] = {r=255, g=0, b=0},
-                [2] = {r=255, g=165, b=0},
-                [3] = {r=255, g=255, b=0},
-                [4] = {r=0, g=255, b=0},
-                [5] = {r=0, g=255, b=255},
-            }
-            
-            local color = colors[math.min(point.priority or 1, 5)] or colors[5]
-            SetVehicleCustomPrimaryColour(vehicle, color.r, color.g, color.b)
-            SetVehicleCustomSecondaryColour(vehicle, color.r, color.g, color.b)
-            
-            local blip = AddBlipForEntity(vehicle)
-            SetBlipSprite(blip, 1)
-            SetBlipColour(blip, point.priority <= 5 and point.priority or 5)
-            SetBlipAsShortRange(blip, true)
-            BeginTextCommandSetBlipName("STRING")
-            AddTextComponentString("P" .. point.priority .. " #" .. i)
-            EndTextCommandSetBlipName(blip)
-            
-            table.insert(convoyTestVehicles, {
-                vehicle = vehicle,
-                blip = blip,
-                point = i,
-                priority = point.priority
-            })
+            for i = 1, vehicleCount do
+                local offset = offsets[i] or {x = 0, y = 0}
+                table.insert(spawnPositions, vector4(
+                    basePos.x + offset.x,
+                    basePos.y + offset.y,
+                    basePos.z,
+                    basePos.w or warehouse.heading
+                ))
+            end
         end
+    end
+    
+    -- Spawn vehicles
+    for i = 1, vehicleCount do
+        local spawnPos = spawnPositions[i] or warehouse.vehicle.position
+        
+        local vehicle = CreateVehicle(model, 
+            spawnPos.x, spawnPos.y, spawnPos.z, 
+            spawnPos.w or warehouse.heading, 
+            true, false)
+        
+        SetEntityAsMissionEntity(vehicle, true, true)
+        SetVehicleOnGroundProperly(vehicle)
+        
+        -- Color code by team type
+        local colors = {
+            DUO = {r=255, g=165, b=0},    -- Orange for shared
+            SQUAD = {r=0, g=150, b=255},   -- Blue for squad
+            LARGE = {r=0, g=255, b=0}      -- Green for large
+        }
+        
+        local color = colors[teamType]
+        SetVehicleCustomPrimaryColour(vehicle, color.r, color.g, color.b)
+        SetVehicleCustomSecondaryColour(vehicle, color.r, color.g, color.b)
+        
+        -- Add blip
+        local blip = AddBlipForEntity(vehicle)
+        SetBlipSprite(blip, 1)
+        SetBlipColour(blip, i == 1 and 2 or i == 2 and 3 or 5)
+        SetBlipAsShortRange(blip, true)
+        BeginTextCommandSetBlipName("STRING")
+        AddTextComponentString(string.format("%s #%d", teamType, i))
+        EndTextCommandSetBlipName(blip)
+        
+        table.insert(hybridTestVehicles, {
+            vehicle = vehicle,
+            blip = blip,
+            vehicleIndex = i,
+            teamType = teamType
+        })
     end
     
     isSpawning = false
     
     lib.notify({
-        title = 'Convoy Spawned',
-        description = string.format('%d vehicles spawned successfully', #convoyTestVehicles),
+        title = '✅ Hybrid Fleet Spawned',
+        description = string.format(
+            '**%s MODE ACTIVE**\n🚛 %d vehicle(s) spawned\n📦 Ready for team delivery!',
+            teamType, vehicleCount
+        ),
         type = 'success',
-        duration = 5000
+        duration = 8000,
+        markdown = true
     })
 end)
 
-RegisterNetEvent('convoy:clearAll')
-AddEventHandler('convoy:clearAll', function()
+RegisterNetEvent('hybrid:clearAll')
+AddEventHandler('hybrid:clearAll', function()
     local count = 0
     
-    for _, data in ipairs(convoyTestVehicles) do
+    for _, data in ipairs(hybridTestVehicles) do
         if DoesEntityExist(data.vehicle) then
             DeleteVehicle(data.vehicle)
             count = count + 1
@@ -966,7 +1072,7 @@ AddEventHandler('convoy:clearAll', function()
         end
     end
     
-    convoyTestVehicles = {}
+    hybridTestVehicles = {}
     
     if count > 0 then
         lib.notify({
@@ -978,13 +1084,13 @@ AddEventHandler('convoy:clearAll', function()
     end
 end)
 
-RegisterNetEvent('convoy:toggleMarkers')
-AddEventHandler('convoy:toggleMarkers', function(warehouseId)
+RegisterNetEvent('hybrid:toggleMarkers')
+AddEventHandler('hybrid:toggleMarkers', function(warehouseId)
     showingMarkers = not showingMarkers
     
     if showingMarkers then
         local warehouse = Config.Warehouses[warehouseId]
-        if not warehouse or not warehouse.convoySpawnPoints then
+        if not warehouse then
             lib.notify({
                 title = 'Invalid Warehouse',
                 description = 'Warehouse configuration not found',
@@ -995,53 +1101,88 @@ AddEventHandler('convoy:toggleMarkers', function(warehouseId)
             return
         end
         
-        local spawnPoints = warehouse.convoySpawnPoints
-        
         lib.notify({
             title = 'Markers Enabled',
-            description = 'Showing spawn point markers',
+            description = 'Showing hybrid spawn points (Max 3)',
             type = 'info',
             duration = 3000
         })
         
         Citizen.CreateThread(function()
             while showingMarkers do
-                for i, point in ipairs(spawnPoints) do
-                    if point.position then
-                        local r, g, b = 255, 255, 255
-                        if point.priority == 1 then
-                            r, g, b = 255, 0, 0
-                        elseif point.priority == 2 then
-                            r, g, b = 255, 165, 0
-                        elseif point.priority == 3 then
-                            r, g, b = 255, 255, 0
-                        elseif point.priority == 4 then
-                            r, g, b = 0, 255, 0
-                        elseif point.priority == 5 then
-                            r, g, b = 0, 255, 255
-                        end
+                -- Determine spawn positions based on hybrid system
+                local spawnPositions = {}
+                local maxVehicles = 3 -- Hybrid max
+                
+                if warehouse.convoySpawnPoints then
+                    -- Use first 3 convoy points
+                    for i = 1, math.min(maxVehicles, #warehouse.convoySpawnPoints) do
+                        table.insert(spawnPositions, {
+                            position = warehouse.convoySpawnPoints[i].position,
+                            index = i
+                        })
+                    end
+                else
+                    -- Use fallback offsets
+                    local basePos = warehouse.vehicle.position
+                    local offsets = Config.HybridSpawnSystem.spawning.fallbackOffsets
+                    
+                    for i = 1, maxVehicles do
+                        local offset = offsets[i] or {x = 0, y = 0}
+                        table.insert(spawnPositions, {
+                            position = vector4(
+                                basePos.x + offset.x,
+                                basePos.y + offset.y,
+                                basePos.z,
+                                basePos.w
+                            ),
+                            index = i
+                        })
+                    end
+                end
+                
+                -- Draw markers for spawn positions
+                for _, spawn in ipairs(spawnPositions) do
+                    local pos = spawn.position
+                    local index = spawn.index
+                    
+                    -- Color based on vehicle index
+                    local r, g, b = 255, 255, 255
+                    if index == 1 then
+                        r, g, b = 255, 165, 0 -- Orange (DUO/Leader)
+                    elseif index == 2 then
+                        r, g, b = 0, 150, 255 -- Blue (SQUAD)
+                    elseif index == 3 then
+                        r, g, b = 0, 255, 0   -- Green (LARGE)
+                    end
+                    
+                    DrawMarker(
+                        1,
+                        pos.x, pos.y, pos.z - 1.0,
+                        0.0, 0.0, 0.0,
+                        0.0, 0.0, 0.0,
+                        5.0, 5.0, 2.0,
+                        r, g, b, 100,
+                        false, false, 2, false, nil, nil, false
+                    )
+                    
+                    -- Draw text label
+                    local onScreen, _x, _y = World3dToScreen2d(pos.x, pos.y, pos.z + 1.0)
+                    if onScreen then
+                        local labels = {
+                            [1] = "Vehicle 1 (DUO/Leader)",
+                            [2] = "Vehicle 2 (SQUAD)",
+                            [3] = "Vehicle 3 (LARGE)"
+                        }
                         
-                        DrawMarker(
-                            1,
-                            point.position.x, point.position.y, point.position.z - 1.0,
-                            0.0, 0.0, 0.0,
-                            0.0, 0.0, 0.0,
-                            5.0, 5.0, 2.0,
-                            r, g, b, 100,
-                            false, false, 2, false, nil, nil, false
-                        )
-                        
-                        local onScreen, _x, _y = World3dToScreen2d(point.position.x, point.position.y, point.position.z + 1.0)
-                        if onScreen then
-                            SetTextScale(0.4, 0.4)
-                            SetTextFont(4)
-                            SetTextProportional(1)
-                            SetTextColour(255, 255, 255, 255)
-                            SetTextOutline()
-                            SetTextEntry("STRING")
-                            AddTextComponentString(string.format("P%d #%d", point.priority, i))
-                            DrawText(_x, _y)
-                        end
+                        SetTextScale(0.4, 0.4)
+                        SetTextFont(4)
+                        SetTextProportional(1)
+                        SetTextColour(255, 255, 255, 255)
+                        SetTextOutline()
+                        SetTextEntry("STRING")
+                        AddTextComponentString(labels[index])
+                        DrawText(_x, _y)
                     end
                 end
                 Wait(0)
@@ -1146,7 +1287,7 @@ AddEventHandler('onResourceStart', function(resourceName)
             
             if vehicle ~= 0 then
                 local plate = GetVehicleNumberPlateText(vehicle)
-                if string.find(plate, "SUPPLY") or string.find(plate, "DELIV") then
+                if string.find(plate, "SUPPLY") or string.find(plate, "DELIV") or string.find(plate, "TEAM") then
                     print("[SUPPLY RESET] Auto-reset triggered due to resource restart")
                     TriggerEvent('supply:forceJobReset')
                 end
